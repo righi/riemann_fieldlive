@@ -47,14 +47,12 @@ for f, txt in FIELD_EDITS:
     lines[f][hits[0]] = None          # None = deleted line
 
 # ---------- imports / downstream ----------
+# imports may be `import X`, or under the module system `public import X`, `meta import X`, `import all X`
+IMP = re.compile(r"^(?:public\s+|private\s+|meta\s+)*import\s+(?:all\s+)?(\S+)", re.M)
 rev = collections.defaultdict(set)
 for f, ls in files.items():
-    for l in ls:
-        if l.startswith("import "):
-            m = l.split()[1]
-            if m in mod2file: rev[mod2file[m]].add(f)
-        elif l.strip() and not l.startswith(("import", "--", "/-", "module", "public import", "prelude")):
-            break
+    for m in IMP.findall("\n".join(ls)):
+        if m in mod2file: rev[mod2file[m]].add(f)
 _down = {}
 def downstream(f):
     if f not in _down:
@@ -85,7 +83,10 @@ for f, ls in files.items():
         if l.startswith("end"):
             if ns: ns.pop()
             pend = None; continue
-        if (l.startswith(("/--", "@[")) and not HDR.match(l)) or            (l.startswith(("open ", "set_option ", "attribute ", "omit ", "include ")) and ls[b-1].rstrip().endswith(" in")):
+        last = next((ls[j].rstrip() for j in range(b - 1, a - 1, -1) if ls[j].strip()), "")
+        # doc comments, attributes, and any `... in` command prefix belong to the declaration that follows
+        if (l.startswith(("/--", "@[")) and not HDR.match(l)) or \
+           (not HDR.match(l) and not l.startswith(("namespace ", "end", "section")) and last.endswith(" in")):
             if pend is None: pend = a
             continue
         m = HDR.match(l)
@@ -163,6 +164,7 @@ for f, sp in spans.items():
     for a, b in sp:
         for j in range(a, b):
             if lines[f][j] is not None: lines[f][j] = None; nl += 1
+print("import edges:", sum(len(v) for v in rev.values()))
 print("ambiguous names among dead:", sum(1 for d in dead if unpriv(d) in dup))
 print(f"FINAL: delete {len(deleted)} declarations, {nl} lines in {len(spans)} files; kept {len(keep)} of {len(dead)} dead constants")
 open("prune-deleted.txt", "w").write("\n".join(deleted) + "\n")

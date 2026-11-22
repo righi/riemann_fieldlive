@@ -78,11 +78,15 @@ python3 prune436.py TREE/src results/v4.33/dropped-constants.txt decl_edges.csv.
    largest fields; edit `FIELD_EDITS` for others.
 2. Finds top-level declarations by tracking namespaces. A declaration is deleted only if its
    exact kernel name is in the dropped set, and the name is defined in only one place.
+   Doc comments, attributes and command prefixes ending in ` in` (`variable … in`,
+   `open … in`, `set_option … in`) go with the declaration they introduce.
 3. Repeats until nothing changes. A declaration is kept if any surviving text in its file, or
-   in a file that imports it, mentions any dotted suffix of its name. Dropped constants that
+   in a file that imports it (directly or transitively; `import`, `public import`, `meta import`
+   and `import all` all count), mentions any dotted suffix of its name. Dropped constants that
    can't be found by name (such as anonymous instances) are kept too, together with their
    dropped dependencies.
 
-On the rh#66 tree, the two largest fields free 1,711 declarations (about 23k lines in 419 files).
+On the rh#66 tree, the two largest fields free 1,631 declarations (about 22.5k lines in 411 files).
+That figure is not final: a build check of this result is still running.
 Removing a field can only weaken an assumption, so the worst outcome is a compile error,
 never an unsound proof. Still, build the result and check axioms.
