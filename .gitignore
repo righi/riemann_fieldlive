@@ -1,0 +1,11 @@
+# compiled analyzer
+/fieldlive
+*.o
+# export dump and other downloads
+*.zst
+*.ndjson
+# ad-hoc run outputs
+/OUT/
+/export/
+/out/
+prune-deleted.txt
