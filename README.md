@@ -86,7 +86,9 @@ python3 prune436.py TREE/src results/v4.33/dropped-constants.txt decl_edges.csv.
    can't be found by name (such as anonymous instances) are kept too, together with their
    dropped dependencies.
 
-On the rh#66 tree, the two largest fields free 1,631 declarations (about 22.5k lines in 411 files).
-That figure is not final: a build check of this result is still running.
+On the rh#66 tree (Lean v4.36), the two largest fields free 1,631 declarations (about 22.5k lines
+in 411 files). The pruned tree builds with no errors (all 149,395 modules; 69,429 rebuilt), `Main.lean`
+and `Challenge.lean` are unchanged, and the five `Main` theorems depend only on `propext`,
+`Classical.choice` and `Quot.sound`.
 Removing a field can only weaken an assumption, so the worst outcome is a compile error,
 never an unsound proof. Still, build the result and check axioms.
