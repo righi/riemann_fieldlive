@@ -42,9 +42,10 @@ mod2file = {f[:-5].replace("/", "."): f for f in files}
 lines = {f: list(ls) for f, ls in files.items()}
 
 for f, txt in FIELD_EDITS:
-    hits = [i for i, l in enumerate(lines[f]) if l.strip() == txt]
-    assert len(hits) == 1, (f, txt, hits)
-    lines[f][hits[0]] = None          # None = deleted line
+    hits = [i for i, l in enumerate(lines.get(f, [])) if l is not None and l.strip() == txt]
+    assert len(hits) <= 1, (f, txt, hits)
+    if hits: lines[f][hits[0]] = None          # None = deleted line
+    else: print("field edit already applied (line not found):", f, "|", txt)
 
 # ---------- imports / downstream ----------
 # imports may be `import X`, or under the module system `public import X`, `meta import X`, `import all X`
