@@ -112,5 +112,14 @@ and peaked at about 35 GB of working memory (RSS reads higher because it counts 
 Small subterms (depth ≤ 4) are not memoised, so the `constructor_sites_held` column can count a site
 more than once; dead fields and dropped constants are unaffected.
 
-Results: `results/v4.37-cc10d0d/`. It reports every field removed for being unread in the merged
-#151 PRs (#458, #459, #474, #478, #489's `DivT.loc`, #490), and the same 28 dead `DivX` fields as the v4.33 run.
+It also writes `dead-edges.csv` (`src,,dst`: kernel references between dropped constants), and,
+like `fieldlive.cpp`, honours `FIELDLIVE_ONLY=FILE` (lines `Structure<TAB>field`) so that only
+those fields may drop, which gives the exact removal set for one PR.
+
+No local build is needed: clone the project, run `lake exe cache get` (about 20 minutes, 82 GB),
+then run the command above in that tree.
+
+Results: `results/v4.37-cc10d0d/` (#431's old head) and `results/v4.37-94779230/` (main on
+2026-11-24, from the CI cache: 2,670 dead fields in 896 structures, 5,942 constants dropped).
+On cc10d0dd2 it reports every field removed for being unread in the merged #151 PRs (#458, #459,
+#474, #478, #489's `DivT.loc`, #490), and the same 28 dead `DivX` fields as the v4.33 run.
