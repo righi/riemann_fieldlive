@@ -92,3 +92,25 @@ and `Challenge.lean` are unchanged, and the five `Main` theorems depend only on 
 `Classical.choice` and `Quot.sound`. The same holds after rebasing onto upstream main at `fb085fff5bf`.
 Removing a field can only weaken an assumption, so the worst outcome is a compile error,
 never an unsound proof. Still, build the result and check axioms.
+
+## In-process version (`lean/`), no export needed
+
+`lean4export` on the v4.37 tree needs more than 90 GB and did not finish. `lean/Fieldlive.lean` is a port
+of `fieldlive.cpp` that runs on the built project directly: it imports `Main` (the `.olean` files are
+memory-mapped) and walks the kernel terms in place. Same rules, same output files.
+
+```bash
+cd lean && lake build                      # toolchain must match the project's
+cd /path/to/riemann-hypothesis             # built tree (or oleans from the CI cache)
+ulimit -s unlimited
+lake env /path/to/lean/.lake/build/bin/fieldlive OUTDIR /path/to/lean/project-roots.txt [ROOT...]
+```
+
+`project-roots.txt` lists the project's top-level module names; a structure is a candidate if it is
+defined under one of them (this replaces `project-inductives.txt`). On cc10d0dd2 it took 45 minutes
+and peaked at about 35 GB of working memory (RSS reads higher because it counts the mapped oleans).
+Small subterms (depth ≤ 4) are not memoised, so the `constructor_sites_held` column can count a site
+more than once; dead fields and dropped constants are unaffected.
+
+Results: `results/v4.37-cc10d0d/`. It reports every field removed for being unread in the merged
+#151 PRs (#458, #459, #474, #478, #489's `DivT.loc`, #490), and the same 28 dead `DivX` fields as the v4.33 run.

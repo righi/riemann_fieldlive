@@ -1,0 +1,7 @@
+name = "fieldlive"
+defaultTargets = ["fieldlive"]
+
+[[lean_exe]]
+name = "fieldlive"
+root = "Fieldlive"
+supportInterpreter = true
