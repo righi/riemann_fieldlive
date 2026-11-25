@@ -9,3 +9,5 @@
 /export/
 /out/
 prune-deleted.txt
+# lake build output
+.lake/

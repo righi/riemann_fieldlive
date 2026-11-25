@@ -26,6 +26,8 @@ out. A baseline run, with every field counted as read, gives the ordinary closur
 | `run-fieldlive.sh` | One-step wrapper: downloads the export (resumable), checks its sha256, builds `fieldlive` and runs it. |
 | `prune.py` | Deletes the declarations a run found unreachable, after you have made the structural edits yourself (see below). |
 | `prune436.py` | The earlier version used for the first #431, with its two field edits hard-coded. Kept for the record. |
+| `by-structure.py` | Groups a run's dead fields by structure, with constants freed per structure and optional claim notes (`claims-151.tsv`). |
+| `claims-151.tsv` | Who has claimed which structure on rh#151 or in an open PR, as a snapshot (2026-11-25). |
 | `results/v4.33/` | Output of a full run on the Lean v4.33 export (see below). Later runs go in sibling folders. |
 
 ## Build and run
@@ -135,3 +137,21 @@ Results: `results/v4.37-cc10d0d/` (#431's old head) and `results/v4.37-94779230/
 2026-11-24, from the CI cache: 2,670 dead fields in 896 structures, 5,942 constants dropped).
 On cc10d0dd2 it reports every field removed for being unread in the merged #151 PRs (#458, #459,
 #474, #478, #489's `DivT.loc`, #490), and the same 28 dead `DivX` fields as the v4.33 run.
+`results/v4.37-fcb6eac753/` is main on 2026-11-25 (after batch 12): 2,449 dead fields in 862 structures,
+4,063 constants dropped. It adds `by-structure.tsv` (`python3 by-structure.py OUT claims-151.tsv`).
+
+### Other options (environment variables)
+
+- `FIELDLIVE_PATHS=1`: also write `parents.tsv` (`constant, depth, parent`), a shortest-path tree of
+  references from the roots in the field-mode walk, so you can see why a constant is still live.
+  The run also writes `live-constants.txt` and `constants-info.tsv` (every project constant with its
+  module, kind, whether its type ends in `Prop`, and whether it is live in the baseline and in field mode).
+- `FIELDLIVE_LIVE_ONLY=1`: skip the baseline; write only the field-mode live set (and the tree).
+- `FIELDLIVE_MODULE=M`: import `M` instead of `Main` (for testing on a small module).
+- `FIELDLIVE_MODE=args` (experimental): unused theorem arguments instead of dead fields. Candidates are
+  explicit, Prop-typed arguments of reachable project theorems (not in `Main`, `Statements` or
+  `Challenge`) whose variable occurs neither in the proof nor in a later binder type nor the statement.
+  The walk holds back such an argument at every full call; a bare or partial use of the theorem counts
+  as using all its arguments. Fields all count as read. Writes `unused-args.tsv` (theorem, argument
+  index and name, type, call sites held, constants freed and their list) plus `dropped-constants.txt`
+  and `dead-edges.csv` for `prune.py`. `FIELDLIVE_ONLY` then takes `theorem<TAB>argument_index` lines.
