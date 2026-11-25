@@ -1,0 +1,71 @@
+# structure-name suffix <TAB> claim (from #151 comments and open PRs, 2026-11-25 ~04:00Z)
+GeoTie.GeoLaws	righi
+GeoTie.ThetaTie	righi
+BasicNotions.NTh	righi
+Herm.FullTiedS	dga471
+IsMonomialCasePrincipalization	dga471
+WeilCompatibleEquivariance	dga471
+Herm.StepLevelQ	dga471
+CassData	dga471
+JointsSAlt	dga471
+BasicNotions.DivX	dga471 (#1873)
+NormalizedTypesCompatibility	dga471
+NormalizedLocalCompatibility	dga471
+NGalTiedAlt	dga471
+WeilCore.Rules	dga471 (#1866)
+WeilFun	dga471 (#1866)
+CartHyp	dga471 (#1931)
+FormalSeriesBounds.Cart	dga471
+NRhoTied	dga471 (#1988)
+SpectralDataCompatible	dga471
+CxData.HeckeWC	dga471 (#2098)
+CxData.HeckeRowsC	dga471 (#2098)
+HeckeRows	dga471 (#2098)
+HeckeAll	dga471 (#2098)
+SelectedSideOfRealRecord	dga471
+RowsC	dga471 (#2100)
+RestrictionSymmetric	dga471
+ExtA	dga471
+HSCore.Coord	dga471 (#1861)
+PublishedHodgeBundleTheorems	dga471 (#2060)
+CovTop.Hypotheses''	dga471 (#2060)
+HostDatumWithTies	dga471 (#2061)
+ColsHermS	dga471 (#2068)
+DivTied3	dga471 (#2070)
+PtModel	dga471 (#2072)
+KerLaws	dga471 (#2072)
+ThetaX	ZachSchlosser (#1859)
+RealisesE	ZachSchlosser
+BesselTied	ZachSchlosser
+Herm.AtT	ZachSchlosser (#1891)
+ParameterChoice'	ZachSchlosser (#2138)
+ShimX	ZachSchlosser
+HypothesesX	nielswiegerss-code
+Theta.AllTied	nielswiegerss-code / dga471 (#1866, `unr`)
+ThetaTied	nielswiegerss-code
+WeilTied	nielswiegerss-code
+LocalToGlobal₂	nielswiegerss-code
+SIso	nielswiegerss-code
+IsometryCarriesCharacter.Carries	TmLev (#1860)
+ColumnCharactersCompatible	TmLev (#1920)
+CrystallineSemistableComparison.CrysCmp	TmLev (#2064)
+CrystallineSemistableComparison.FMap	TmLev (#2064)
+CrystallineSemistableComparison.Iso	TmLev (#2064)
+CrystallineSemistableComparison.PerC.Facts	TmLev (#2064)
+CrystallineSemistableComparison.Pb.Fac	TmLev (#2064) / jennyyyyzhen (#2056)
+CstSmooth	jennyyyyzhen (#2055)
+SymmetricCompatibleData	jjoshua2 (#2062)
+IsAutOn	RudiksChess (#1491)
+TwInputs.TwistedRealJoin	dga471 (#2140)
+L2.AUTiedAlt	dga471 (#2145)
+CrystallineSemistableComparison.ComparisonOn	jennyyyyzhen (#2055)
+Mem.Df.StandIn	dga471
+BridgeLemma.CData	dga471
+ContractionTensorModels.ContrProps	dga471
+WeilGramSignature.IsCentralShift	dga471
+ArithmeticCylinders.AllRowsAt	dga471
+DIV.DivisionKernelData	dga471
+ImageStableDegreeBounds.DegreeBounds	dga471
+HeightCounting.Up.CopyN	dga471
+KAat.AtHyp	dga471
+CuspidalNoRadicalFixed.IsCuspidalOp	dga471
