@@ -24,7 +24,8 @@ out. A baseline run, with every field counted as read, gives the ordinary closur
 | `fieldlive.cpp` | The analyzer: one C++ file, standard library only. |
 | `project-inductives.txt` | The 5,569 inductive types defined in the project, one per line. It limits the analysis to project structures rather than Mathlib's. Derived from `decls.csv` in the rh-proof-dependencies v0.2.1 release. |
 | `run-fieldlive.sh` | One-step wrapper: downloads the export (resumable), checks its sha256, builds `fieldlive` and runs it. |
-| `prune436.py` | Applies the removals directly to a source tree (see below). The two field edits are hard-coded. |
+| `prune.py` | Deletes the declarations a run found unreachable, after you have made the structural edits yourself (see below). |
+| `prune436.py` | The earlier version used for the first #431, with its two field edits hard-coded. Kept for the record. |
 | `results/v4.33/` | Output of a full run on the Lean v4.33 export (see below). Later runs go in sibling folders. |
 
 ## Build and run
@@ -66,27 +67,38 @@ other fields are removed), and `LiteratureCMHypothesis.st` (8,452 lines).
 **Caveat:** these numbers come from the Lean v4.33 export, before the v4.36 port (rh#66) and
 later trims, so on the current tree they will be smaller. Re-run on a fresh export of that tree.
 
-## Applying removals: `prune436.py`
+## Applying removals: `prune.py`
+
+For one PR:
+
+1. Run the Lean version (below) with `FIELDLIVE_ONLY` set to just the fields you are removing.
+2. Make the structural edits by hand: delete the fields, their assignments at every construction
+   site, and any signature that passed them on.
+3. Run `prune.py` on the edited tree:
 
 ```bash
-python3 prune436.py TREE/src results/v4.33/dropped-constants.txt decl_edges.csv.gz [--apply]
+python3 prune.py src OUT/dropped-constants.txt OUT/dead-edges.csv [--apply] [--out deleted.txt]
 ```
 
-`decl_edges.csv.gz` comes from the rh-proof-dependencies release.
+Without `--apply` it only reports. The list of deleted declarations goes to `--out`
+(default `prune-deleted.txt`), ready for the PR description.
 
-1. Deletes the dead fields and their assignments. These are hard-coded for the two
-   largest fields; edit `FIELD_EDITS` for others.
-2. Finds top-level declarations by tracking namespaces. A declaration is deleted only if its
+How it decides:
+
+1. Finds top-level declarations by tracking namespaces. A declaration is deleted only if its
    exact kernel name is in the dropped set, and the name is defined in only one place.
    Doc comments, attributes and command prefixes ending in ` in` (`variable … in`,
    `open … in`, `set_option … in`) go with the declaration they introduce.
-3. Repeats until nothing changes. A declaration is kept if any surviving text in its file, or
+2. Repeats until nothing changes. A declaration is kept if any surviving text in its file, or
    in a file that imports it (directly or transitively; `import`, `public import`, `meta import`
    and `import all` all count), mentions any dotted suffix of its name. Dropped constants that
    can't be found by name (such as anonymous instances) are kept too, together with their
    dropped dependencies.
 
-On the rh#66 tree (Lean v4.36), the two largest fields free 1,631 declarations (about 22.5k lines
+Code that is already unreachable from `Main` is still compiled, so always build the result.
+On current main this produced #431 (457 declarations) and #1783 (43 declarations), both merged.
+
+Earlier, with `prune436.py` on the rh#66 tree (Lean v4.36), the two largest fields free 1,631 declarations (about 22.5k lines
 in 411 files). The pruned tree builds with no errors (all 149,395 modules; 69,429 rebuilt), `Main.lean`
 and `Challenge.lean` are unchanged, and the five `Main` theorems depend only on `propext`,
 `Classical.choice` and `Quot.sound`. The same holds after rebasing onto upstream main at `fb085fff5bf`.
