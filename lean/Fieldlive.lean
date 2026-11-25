@@ -39,6 +39,10 @@ structure Ctx where
   paths : Bool := false
   argMode : Bool := false
   argOf : Std.HashMap Name Nat := {}
+  /-- defined in a project module (outside Lean, Std, Mathlib, ...) -/
+  isProj : Name → Bool
+  /-- also walk into library constants (FIELDLIVE_DEEP=1; slower, same project results) -/
+  deep : Bool
 
 structure St where
   live : Std.HashSet Name := {}
@@ -142,6 +146,9 @@ def reach (n : Name) : M Unit := do
   if (← get).live.contains n then return
   markLive n
   let ctx ← read
+  -- A library constant's type and value cannot mention project constants (libraries do not import
+  -- the project), so there is nothing to find inside them: mark it live and stop.
+  if !ctx.deep && !ctx.isProj n then return
   let some ci := ctx.env.find? n | return
   withCur n do
   match ci with
@@ -293,7 +300,7 @@ def propArgs (env : Environment) (cs : Array (Name × Array (Nat × Name))) :
   return r
 
 /-- dropped constants (live in `liveBase`, not in `live`) reachable from the expressions `es` -/
-unsafe def freedFrom (env : Environment) (liveBase live : Std.HashSet Name) (es : Array Expr) : Array Name := Id.run do
+unsafe def freedFrom (env : Environment) (isProj : Name → Bool) (liveBase live : Std.HashSet Name) (es : Array Expr) : Array Name := Id.run do
   let mut vis : Std.HashSet USize := {}
   let mut got : Std.HashSet Name := {}
   let mut gotL : Array Name := #[]
@@ -305,7 +312,7 @@ unsafe def freedFrom (env : Environment) (liveBase live : Std.HashSet Name) (es 
     vis := vis.insert (ptrAddrUnsafe e)
     match e with
     | .const n _ =>
-      if liveBase.contains n && !live.contains n && !got.contains n then
+      if liveBase.contains n && !live.contains n && !got.contains n && isProj n then
         got := got.insert n; gotL := gotL.push n
         if let some ci := env.find? n then
           st := st.push ci.type
@@ -321,16 +328,16 @@ unsafe def freedFrom (env : Environment) (liveBase live : Std.HashSet Name) (es 
 
 /-- `dropped-constants.txt` and `dead-edges.csv` ("src,,dst"; an inductive also uses its
 constructors' types) for `prune.py`; returns the number dropped -/
-def writeDropped (env : Environment) (outdir : String) (liveBase live : Std.HashSet Name) : IO Nat := do
+def writeDropped (env : Environment) (outdir : String) (isProj : Name → Bool) (liveBase live : Std.HashSet Name) : IO Nat := do
   let dr ← IO.FS.Handle.mk (outdir ++ "/dropped-constants.txt") .write
   let mut dropped := 0
   for n in liveBase do
-    if !live.contains n && env.contains n then
+    if !live.contains n && env.contains n && isProj n then
       dropped := dropped + 1; dr.putStrLn (nm n)
   dr.flush
   let de ← IO.FS.Handle.mk (outdir ++ "/dead-edges.csv") .write
   for n in liveBase do
-    if live.contains n then continue
+    if live.contains n || !isProj n then continue
     let some ci := env.find? n | continue
     let mut used := ci.getUsedConstantsAsSet
     if let .inductInfo I := ci then
@@ -338,7 +345,7 @@ def writeDropped (env : Environment) (outdir : String) (liveBase live : Std.Hash
         used := used.insert cn
         if let some cc := env.find? cn then used := used.union cc.getUsedConstantsAsSet
     for m in used do
-      if m != n && liveBase.contains m && !live.contains m then de.putStrLn s!"{nm n},,{nm m}"
+      if m != n && liveBase.contains m && !live.contains m && isProj m then de.putStrLn s!"{nm n},,{nm m}"
   de.flush
   return dropped
 
@@ -408,12 +415,14 @@ unsafe def mainImpl (args : List String) : IO UInt32 := do
     IO.eprintln s!"FIELDLIVE_ONLY: {kept} fields may be dropped"
   let rootsFound := roots.filter env.contains
   IO.eprintln s!"roots found: {rootsFound.length} of {roots.length}"
+  let deep := (← IO.getEnv "FIELDLIVE_DEEP").isSome
+  IO.eprintln s!"walk: {if deep then "deep (into library constants)" else "project constants only"}"
   -- FIELDLIVE_PATHS=1: record references during the field-mode walk; write a BFS parent tree
   let paths := (← IO.getEnv "FIELDLIVE_PATHS").isSome
   -- FIELDLIVE_LIVE_ONLY=1: skip the baseline; write only the field-mode live set (and the tree)
   let liveOnly := (← IO.getEnv "FIELDLIVE_LIVE_ONLY").isSome
   let mkCtx (fm : Bool) (am := false) (argOf : Std.HashMap Name Nat := {}) : Ctx :=
-    { env, candOfInd, candOfCtor, candOfRec, fieldMode := fm, paths := paths && (fm || am), argMode := am, argOf }
+    { env, candOfInd, candOfCtor, candOfRec, fieldMode := fm, paths := paths && (fm || am), argMode := am, argOf, isProj := isProject, deep }
   let go : M Unit := do for r in rootsFound do reach r; run
   IO.FS.createDirAll outdir
   let writeLive (sf : St) : IO Unit := do
@@ -450,7 +459,9 @@ unsafe def mainImpl (args : List String) : IO UInt32 := do
     writeLive sf
     return 0
   -- baseline
+  let t0 ← IO.monoMsNow
   let ((), sb) ← (go.run (mkCtx false)).run { vis := Std.HashSet.emptyWithCapacity (1 <<< 20), cands }
+  IO.eprintln s!"baseline pass: {((← IO.monoMsNow) - t0) / 1000} s"
   let liveBase := sb.live
   IO.eprintln s!"baseline live constants: {liveBase.size} (visited {sb.nVis} nodes)"
   -- FIELDLIVE_MODE=args: unused theorem arguments instead of dead fields (fields all count as read)
@@ -487,7 +498,7 @@ unsafe def mainImpl (args : List String) : IO UInt32 := do
     let live := sa.live
     IO.eprintln s!"arg-mode live constants: {live.size} (visited {sa.nVis} nodes)"
     writeLive sa
-    let dropped ← writeDropped env outdir liveBase live
+    let dropped ← writeDropped env outdir isProject liveBase live
     let ua ← IO.FS.Handle.mk (outdir ++ "/unused-args.tsv") .write
     ua.putStrLn "theorem\targ_index\targ_name\ttype\tcall_sites_held\tfreed\tfreed_constants"
     let mut nUnused := 0
@@ -496,15 +507,29 @@ unsafe def mainImpl (args : List String) : IO UInt32 := do
       for s in [0:c.slots.size] do
         if c.used[s]! then continue
         nUnused := nUnused + 1
-        let got := freedFrom env liveBase live (c.pend[s]!.map (·.1))
+        let got := freedFrom env isProject liveBase live (c.pend[s]!.map (·.1))
         ua.putStrLn s!"{nm c.thm}\t{c.slots[s]!}\t{nm c.names[s]!}\t{tyOf.getD (c.thm, c.slots[s]!) ""}\t{c.pend[s]!.size}\t{got.size}\t{";".intercalate (got.toList.map nm)}"
     ua.flush
     IO.eprintln s!"unused arguments: {nUnused}; constants dropped: {dropped}"
     IO.println s!"unused_args\t{nUnused}\ndropped_constants\t{dropped}"
     return 0
+  let t1 ← IO.monoMsNow
   let ((), sf) ← (go.run (mkCtx true)).run { vis := Std.HashSet.emptyWithCapacity (1 <<< 20), cands }
+  IO.eprintln s!"field-mode pass: {((← IO.monoMsNow) - t1) / 1000} s"
   let live := sf.live
   IO.eprintln s!"field-mode live constants: {live.size} (visited {sf.nVis} nodes)"
+  -- FIELDLIVE_LIVE_OUT=file: write the field-mode live project constants (a "before" snapshot).
+  -- FIELDLIVE_BEFORE=file: such a snapshot from before an edit. Then "dropped" means live before and
+  -- not live now, which also catches what signature changes (not only dead fields) freed.
+  if let some f ← IO.getEnv "FIELDLIVE_LIVE_OUT" then
+    let h ← IO.FS.Handle.mk f .write
+    for n in live do if isProject n then h.putStrLn (nm n)
+    h.flush
+  let pool : Std.HashSet Name ← match ← IO.getEnv "FIELDLIVE_BEFORE" with
+    | some f => do
+      let ls ← IO.FS.lines f
+      pure (ls.foldl (fun s l => if l.isEmpty then s else s.insert (String.toName l)) {})
+    | none => pure liveBase
   -- outputs
   writeLive sf
   -- every project constant: module, kind, whether its type ends in Prop, live in baseline / field mode
@@ -532,7 +557,7 @@ unsafe def mainImpl (args : List String) : IO UInt32 := do
         df.putStrLn s!"{nm c.ind}\t{nm c.fieldNames[k]!}\t{if c.prop then 1 else 0}\t{k}\t{c.nFields}\t{c.pend[k]!.size}"
     if any then deadStructs := deadStructs + 1
   df.flush
-  let dropped ← writeDropped env outdir liveBase live
+  let dropped ← writeDropped env outdir isProject pool live
   IO.eprintln s!"dead fields: {deadFields} in {deadStructs} live structures; constants dropped: {dropped}"
   -- per dead field: dropped constants reachable from what it holds back
   let fa ← IO.FS.Handle.mk (outdir ++ "/field-reach.tsv") .write
@@ -540,7 +565,7 @@ unsafe def mainImpl (args : List String) : IO UInt32 := do
     if !live.contains c.ind then continue
     for k in [0:c.nFields] do
       if c.read[k]! then continue
-      let gotL := freedFrom env liveBase live (c.pend[k]!.map (·.1))
+      let gotL := freedFrom env isProject liveBase live (c.pend[k]!.map (·.1))
       fa.putStrLn s!"{nm c.ind}\t{nm c.fieldNames[k]!}\t{gotL.size}\t{";".intercalate (gotL.toList.map nm)}"
   fa.flush
   IO.println s!"dead_fields\t{deadFields}\ndead_structs\t{deadStructs}\ndropped_constants\t{dropped}"

@@ -130,6 +130,24 @@ It also writes `dead-edges.csv` (`src,,dst`: kernel references between dropped c
 like `fieldlive.cpp`, honours `FIELDLIVE_ONLY=FILE` (lines `Structure<TAB>field`) so that only
 those fields may drop, which gives the exact removal set for one PR.
 
+The walk does not go into constants from Lean, Std, Batteries or Mathlib: libraries cannot import the
+project, so nothing in them can read a project field. The outputs list project constants only.
+On main a18a350c3e this gave the same results as the full walk (`FIELDLIVE_DEEP=1` restores it), and was
+about 6% faster. Each pass logs its time.
+
+**When an edit changes signatures,** not just fields (an argument or hypothesis is dropped), the code it frees
+is not visible as a dead field. Compare reachability before and after instead:
+
+```bash
+FIELDLIVE_LIVE_OUT=live-before.txt lake env …/fieldlive OUT-before roots.txt   # on the tree before the edit
+# make the edits, build
+FIELDLIVE_BEFORE=live-before.txt lake env …/fieldlive OUT-after roots.txt      # on the edited, built tree
+```
+
+The second run's `dropped-constants.txt` and `dead-edges.csv` then list the project constants that were
+reachable before and are not now, ready for `prune.py`. Use the same `FIELDLIVE_ONLY` in both runs if
+you set one. This is how #3624 (`GeoLaws` and `GeoTie.ThetaTie`) was made.
+
 No local build is needed: clone the project, run `lake exe cache get` (about 20 minutes, 82 GB),
 then run the command above in that tree.
 
