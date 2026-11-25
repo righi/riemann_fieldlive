@@ -518,12 +518,14 @@ unsafe def mainImpl (args : List String) : IO UInt32 := do
   IO.eprintln s!"field-mode pass: {((← IO.monoMsNow) - t1) / 1000} s"
   let live := sf.live
   IO.eprintln s!"field-mode live constants: {live.size} (visited {sf.nVis} nodes)"
-  -- FIELDLIVE_LIVE_OUT=file: write the field-mode live project constants (a "before" snapshot).
-  -- FIELDLIVE_BEFORE=file: such a snapshot from before an edit. Then "dropped" means live before and
-  -- not live now, which also catches what signature changes (not only dead fields) freed.
+  -- FIELDLIVE_LIVE_OUT=file: write the baseline live project constants (a "before" snapshot).
+  -- FIELDLIVE_BEFORE=file: such a snapshot from before an edit. Then "dropped" means live in the
+  -- baseline before and not live (field mode) now: what the dead fields free plus what signature
+  -- changes free. The snapshot is the baseline set, not the field-mode set, so that the fields'
+  -- own share is not left out.
   if let some f ← IO.getEnv "FIELDLIVE_LIVE_OUT" then
     let h ← IO.FS.Handle.mk f .write
-    for n in live do if isProject n then h.putStrLn (nm n)
+    for n in liveBase do if isProject n then h.putStrLn (nm n)
     h.flush
   let pool : Std.HashSet Name ← match ← IO.getEnv "FIELDLIVE_BEFORE" with
     | some f => do

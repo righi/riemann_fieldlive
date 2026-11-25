@@ -144,9 +144,12 @@ FIELDLIVE_LIVE_OUT=live-before.txt lake env …/fieldlive OUT-before roots.txt  
 FIELDLIVE_BEFORE=live-before.txt lake env …/fieldlive OUT-after roots.txt      # on the edited, built tree
 ```
 
-The second run's `dropped-constants.txt` and `dead-edges.csv` then list the project constants that were
-reachable before and are not now, ready for `prune.py`. Use the same `FIELDLIVE_ONLY` in both runs if
-you set one. This is how #3624 (`GeoLaws` and `GeoTie.ThetaTie`) was made.
+The snapshot is the baseline set (every field counted as read), so the second run's
+`dropped-constants.txt` and `dead-edges.csv` list everything the change frees: what the removed fields
+held and what the signature changes cut off. They are ready for `prune.py` on their own. Use the same
+`FIELDLIVE_ONLY` in both runs if you set one. #3624 (`GeoLaws` and `GeoTie.ThetaTie`) was made this way,
+with an earlier version that snapshotted the field-mode set; there the first run's dropped list was
+added to the second's to get the same result.
 
 No local build is needed: clone the project, run `lake exe cache get` (about 20 minutes, 82 GB),
 then run the command above in that tree.
