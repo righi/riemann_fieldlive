@@ -71,11 +71,31 @@ KAat.AtHyp	dga471
 CuspidalNoRadicalFixed.IsCuspidalOp	dga471
 Mem.Th.WeilThetaCompatibility	dga471
 Forms.TwAtT	dga471
-BasicNotions.ThetaJet	dga471
+BasicNotions.ThetaJet	dga471 (#2176)
 Pf.Carrier.ModelsFor	dga471
-LiteralAutomorphy.LitLocAlt	dga471
-HeightCounting.AUSideAlt	dga471
-Forms.SymmetricTwistedJointForms	dga471
-KerRat.KernelsOver	dga471
+LiteralAutomorphy.LitLocAlt	dga471 (#2214) / jennyyyyzhen (#2291)
+HeightCounting.AUSideAlt	dga471 (#2215)
+Forms.SymmetricTwistedJointForms	dga471 (#2216)
+KerRat.KernelsOver	dga471 (#2217)
 Col.ThDist.Ok	lnbrks (#2195)
 JoinChr.SameChr	lnbrks (#2196)
+EpsilonPairingZeta.Realizes	dga471 (#2284)
+Toroidal.TorModel	dga471 (#2285)
+ES.TjCorr	dga471
+LogCris.LogFun	dga471 (#2287)
+LiteralAutomorphy.LocalRepresentationTheoryHypothesesAlt	jennyyyyzhen (#2291)
+FunPr.ThetaLocalInputs	jjoshua2 (#2295)
+Forms.TwFormsTiedS	TmLev (#2267)
+GridJoin.SpMatch	dga471
+IsGridPlaceAuxiliaryHeckeCharacter	dga471
+SymmetricTwistedTiltedData	dga471
+Sym.AdInAlt	dga471
+InfinityTypes.ArithAt	dga471
+PtAt.CompatibilityConditions	dga471
+RecTie.RecReal	dga471
+TunedSheafProperties	dga471
+L2.NExpTied	
+Herm.TwChTied	righi (#2504)
+Theta.KfinTied	dga471 (#2434)
+Ws.Fr.Bounds	TmLev (#2325)
+LowerBoundFree.CuspData	TmLev (#2417)
