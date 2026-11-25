@@ -11,13 +11,13 @@ as proposed claim lines. With --apply: also add the given claims (CLAIM lines on
 Needs `gh` logged in. Matching is by the last name component(s) at identifier boundaries.
 """
 import glob, json, os, re, subprocess, sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 REPO = "leanprover-community/riemann-hypothesis"
 HERE = os.path.dirname(os.path.abspath(__file__))
 # known text matches that are not claims (structure -> PR numbers)
-IGNORE = {"GlobalTheory.FunPr.ThetaLocalInputs": {2079, 2169}, "Formalism.L2.NExpTied": {1071},
-          "Formalism.BasicNotions.Host": {1929, 2138, 1930, 2462},
+IGNORE = {"GlobalTheory.FunPr.ThetaLocalInputs": {2079, 2169}, "Formalism.BasicNotions.RowSide": {3290}, "Formalism.L2.S.LocIso": {2829}, "GlobalTheory.Mem.R3.Rw.Ext": {2804}, "Formalism.L2.Theta.KfinTied": {2684}, "Formalism.L2.NExpTied": {1071},
+          "Formalism.BasicNotions.Host": {1929, 2138, 1930, 2462, 2483},
           "GlobalTheory.Mem.LiteralAutomorphy.LitLocAlt": {2294, 2296},
           "GlobalTheory.Mem.LiteralAutomorphy.LocalRepresentationTheoryHypothesesAlt": {2294, 2296}}
 
@@ -57,8 +57,12 @@ def main():
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     # 1. new comments
-    cs = json.loads(gh("api", f"repos/{REPO}/issues/151/comments?since={st['since']}&per_page=100"))
-    cs = [c for c in cs if c["id"] != st["comment_id"] and c["created_at"] > st["since"]]
+    # overlap the window by 10 minutes (the API can lag) and skip comments already seen
+    since = (datetime.strptime(st["since"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+             - timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    seen = set(st.get("seen", []))
+    cs = json.loads(gh("api", f"repos/{REPO}/issues/151/comments?since={since}&per_page=100"))
+    cs = [c for c in cs if c["id"] != st["comment_id"] and c["id"] not in seen]
     print(f"## {len(cs)} new comment(s) since {st['since']}")
     for c in cs:
         hits = [s for s in rows if mentions(c["body"], key_of(s))]
@@ -75,7 +79,7 @@ def main():
         k = key_of(s)
         cur = claim_of(s)
         for p in prs:
-            if p["number"] in IGNORE.get(s, ()) or p["title"].startswith("chore: batch"):
+            if p["number"] in IGNORE.get(s, ()) or p["title"].startswith("chore: batch") or "local instance" in p["title"]:
                 continue
             if mentions(p["title"] + "\n" + (p["body"] or ""), k) and f"#{p['number']}" not in cur:
                 tag = " merged" if p.get("merged") else ""
@@ -123,6 +127,7 @@ def main():
         gh("api", "-X", "PATCH", f"repos/{REPO}/issues/comments/{st['comment_id']}", "-F", f"body=@{out}")
         print(f"edited comment {st['comment_id']} ({out})")
     st["since"] = now
+    st["seen"] = sorted(seen | {c["id"] for c in cs})[-500:]
     json.dump(st, open(os.path.join(rd, "refresh-state.json"), "w"))
 
 
