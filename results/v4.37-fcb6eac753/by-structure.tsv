@@ -10,7 +10,7 @@ GlobalTheory.GeoTie.GeoLaws	Development.AbelianVarietyTheory.Definitions.Automor
 Formalism.L2.SG.PackageTie2.SIso	Formalism.LocalToGlobal.SiegelLatticeTheory.FlagStabilizerTensors.ParametersTermRelations	10	29	83	nielswiegerss-code	cd,del,letter,inS,FeqF,atP,BBne,cTerm,massPair,meanCount
 GlobalTheory.FunPr.ThetaLocalInputs	Development.AutomorphicArithmetic.ThetaCorrespondence.ThetaPairLifts.LocalTypeDictionary.BernsteinUnitaryProductIrreducible	20	40	80		greenSeriesSt,linnik,complexMultiplicationJSt,bernsteinUnitaryProductIrreducible,zelevinskyPolynomialRing,bernsteinZelevinskyFiniteness,cuspTraceClass,borelCasselman,radfordShufflePolynomial,dixmierMalliavinFactorisation,schurOrthogonalitySquareIntegrable,heckeLPartialContinuation,logDerOne,discreteSeriesLowestKType,heckeLEntireAndNonzeroAtOne,gLHoweDuality,hermitianHassePrinciple,formalDegreeCompactDual,discreteSeriesExists,discreteSeriesCoverExists
 Formalism.L2.Theta.ThetaTied	Formalism.LocalToGlobal.BesselHermitianTheta.MinfDensity	18	28	70	nielswiegerss-code	ev_inj,ev_aut,cusp,actF,actR,ksph,conj,petF_pos,petR_pos,petR_def,petR_minf,btop,eChr_inj,etaT_unr,etaT_exp,xs_pos,ys_sig,ysLow
-GlobalTheory.Mem.LiteralAutomorphy.LitLocAlt	Development.AutomorphicArithmetic.AutomorphicVarieties.ModularityArgument.ThresholdArguments.DenseThresholdCases.LitAut	8	17	64		mp,temp,seg,sq,multi,dzi,brauer,green
+GlobalTheory.Mem.LiteralAutomorphy.LitLocAlt	Development.AutomorphicArithmetic.AutomorphicVarieties.ModularityArgument.ThresholdArguments.DenseThresholdCases.LitAut	8	17	64	dga471	mp,temp,seg,sq,multi,dzi,brauer,green
 GlobalTheory.Mem.LiteralAutomorphy.LocalRepresentationTheoryHypothesesAlt	Development.AutomorphicArithmetic.ThetaCorrespondence.ThetaPairLifts.ThirdPlaceSeries.LocalRepresentationTheoryHypotheses	7	18	59		sq,gen,multi,exh,dzi,brauer,chev
 Formalism.L2.NormalizedTypesCompatibility	Formalism.LocalToGlobal.NormalizedHeckeFactors.GlobalDatumRegularityOfTypesCompatibility	4	16	55	dga471	eM_K,teichC_def,iota_loc,locPar_def
 Formalism.L2.Herm.FullTiedS	Formalism.LocalToGlobal.HermitianColumns.FullSym	4	11	54	dga471	ad,cof,stabMap,fvI
@@ -29,7 +29,7 @@ Formalism.L2.NExpTied	Formalism.LocalToGlobal.NormalizedHeckeFactors.RingHomOfBa
 Formalism.L2.Forms.ColsTiedSym	Formalism.LocalToGlobal.HermitianForms.BothSym	12	22	32		carP,lattice₂,pr,prk,prC,z0,ga,fr0,gl_const,chi,frame_level_zero_const,frP_const
 Formalism.BasicNotions.MemberForms	Formalism.LocalRingCardinality.DataForms	5	59	31		dil_fv,evz_til,ptLat_good,beOn_nonneg,thFree_nonneg
 Formalism.L2.FormalSeriesBounds.RawChart.CartHyp	Formalism.LocalToGlobal.CharacterGerms.RowTieDefs	1	10	31	dga471 (#1931)	sumV
-GlobalTheory.HeightCounting.AUSideAlt	Development.AutomorphicArithmetic.ThetaCorrespondence.ThetaPairLifts.ThirdPlaceSeries.HeckeOpen	3	13	31		mult,surjWt,isoWt
+GlobalTheory.HeightCounting.AUSideAlt	Development.AutomorphicArithmetic.ThetaCorrespondence.ThetaPairLifts.ThirdPlaceSeries.HeckeOpen	3	13	31	dga471	mult,surjWt,isoWt
 Formalism.L2.Forms.TwFormsTiedS	Formalism.LocalToGlobal.HermitianForms.TiedTwSym	8	14	29		chi_offC,chi_offM,chiJ_eq,chiJ_off,dil,ipV,norm,twisted_e0_at_mu0_eq_eMu0
 GlobalTheory.Mem.Th.RealisesE	Development.AbelianVarietyTheory.Definitions.AutomorphicMembership.ExistsSplittingCharacterSelf	18	28	29	ZachSchlosser	inf,eqRank,forms,typ,col,phiUp,xs,ys,ysLow,iXYs,iYXm,thOff,thEq,fact,posDat,pos1Val,besAll,besOnly
 Formalism.L2.NTwTied	Formalism.LocalToGlobal.NormalizedHeckeFactors.WittCoreInclusionMulVecMemLatticeCompletionAtPla	10	16	27		pl_emb,ringSpec_baseIntegersEquiv_algebraMap,ringSpec_baseEmbedding_compatible,eO_alg,eOk_alg,mu_g,concreteTwistFrame_extraExcludedPlaces_conj,sig_inj,qs_pos,S0x_contains_q0_places
@@ -38,7 +38,7 @@ GlobalTheory.LvT.PtModel	Development.AbelianVarietyTheory.Definitions.GlobalTwis
 Formalism.IndefR.Links.RealDat.IsScal	Formalism.LocalToGlobal.IndefiniteReal.LinksChar	6	6	24		lam0,kap,lam_off,zero_part_eigenvalue_abs,lam_abs,lam_tup
 CrystallineSemistableComparison.Pb.Fac	Development.WeilBound.CoreStatements.PadicHodgeComparison.EtaleCohomologyComparison.PerfectoidPullbacks.FrobeniusWittActions.PhiTTmul	2	13	22	TmLev (#2064) / jennyyyyzhen (#2056)	phiT_tmul,phi
 Formalism.BasicNotions.Host	Formalism.LocalRingCardinality.DataHost	4	46	22		o_pow,small_le,𝔟_stable,ccK_primitive
-Formalism.L2.Col.ThDist.Ok	Formalism.LocalToGlobal.Columns.FiniteSumNonzeroLargeDepth	1	4	22		add
+Formalism.L2.Col.ThDist.Ok	Formalism.LocalToGlobal.Columns.FiniteSumNonzeroLargeDepth	1	4	22	lnbrks (#2195)	add
 Formalism.L2.Herm.TwChTied	Formalism.LocalToGlobal.HermitianColumns.TiedQC	10	24	22		eStab0,de_eq,twisted_character_eq,Ch_m,YbFin,yb_orbit,levJ_Lb,levJ_le,levJ_stab,DGam_one
 GlobalTheory.Mem.R3.Rw.ExtN	Development.AbelianVarietyTheory.Definitions.AutomorphicMembership.Forms	10	34	21		V,dict,mu,Kf,cE,x₀,βY,Sb,pb,ΛY
 Formalism.L2.HostDatumWithTies	Development.AutomorphicArithmetic.ThetaCorrespondence.ThetaPairLifts.ThirdPlaceSeries.HostDatumS	7	11	20	dga471 (#2061)	Tu_g,Qw_Tu,clsK_Tu,clsK_Qw,LLgal,HE_hilb,HE_le
@@ -48,13 +48,13 @@ GlobalTheory.Mem.Th.WeilFun	Development.AbelianVarietyTheory.Definitions.Automor
 Formalism.BasicNotions.SizeData₂	Formalism.LocalRingCardinality.DataParams₂	6	63	19		tau_supp,io_supp,untwisted,drop_alt,F_conj,TTw_full
 Formalism.L2.Forms.FormsTiedSym	Formalism.LocalToGlobal.HermitianForms.TiedSym	9	61	19		ipVC,normC,bwC,lamJ_eq,YbFin,yb_orbit,levJ_stab,tilFv,DGam
 Formalism.L2.Herm.ColsHermS	Formalism.LocalToGlobal.HermitianColumns.SymAll	4	10	19	dga471 (#2068)	ad,cof,stabMap,fvI
-Formalism.L2.JoinChr.SameChr	Formalism.LocalToGlobal.JointCharacters.SameChr	3	3	19		idem,fin,inf
+Formalism.L2.JoinChr.SameChr	Formalism.LocalToGlobal.JointCharacters.SameChr	3	3	19	lnbrks (#2196)	idem,fin,inf
 Formalism.MainNotions.ModuliIntegralCharts.Loc	Formalism.SharpRestriction.Divisibility.ModuliIntegralCharts	63	131	19		Xn,abAt,IsLocFree,nrm_nonneg,norm_le_one_of_mem_sections,vrat,Lb_inv,nrmRef,dvRho,chAt,chOpen,chAbExact,chModU,chConst,phiAt_zero,divGe,fjN,resQ,PPq,symmG,rigG,resGt,prPull,principal,psiV,piPP,keySh,at_tors,at_card,ovr_surj,scal_inj,scal_central,ker_ovr,dl_ovr,dl_scal,dl_dl,act_scal,vth,intJet,jet,resB,incT,kapGt,kapB,evA,evGt,omMod,om,ht,IsHTBlowup,eOmP,ExactMod,htSES,nefHT,nefQ,descK,bdryLoci,extA,compat,eDeg,Pm_nonneg,degLie,degLdR
 GlobalTheory.BigTop.PtAt	Development.AbelianVarietyTheory.Definitions.Divisors.TupleReadBaseTupleEqFamily	8	52	19		zs,s0,s1,dc,signs,prXunit,fdiag,muEq
 GlobalTheory.Mem.Th.WeilFun.EqRank	Development.AbelianVarietyTheory.Definitions.AutomorphicMembership.ExistsSplittingCharacterSelf	2	3	19		twW,twV
 UpperTheory.V.Ws.Fr.Bounds	Development.AutomorphicArithmetic.AutomorphicVarieties.WeakShimuraTheory.RedIdeal	1	5	19		loc
 CrystallineSemistableComparison.CrysCmp	Development.WeilBound.CoreStatements.PadicHodgeComparison.EtaleCohomologyComparison.BocksteinBaseChange.AbsPhi	7	8	17	TmLev (#2064)	lin,lin',fin,equi,inj,phi,nat
-Formalism.BasicNotions.ThetaJet	Formalism.LocalRingCardinality.DataJet	8	14	17		l_inert,j_mem,N0_eq,N1_eq_exponentN1,l_inert1,firstJetIndex_mem_range,firstJet_lowerRank_eq,firstJet_upperRank_eq
+Formalism.BasicNotions.ThetaJet	Formalism.LocalRingCardinality.DataJet	8	14	17	dga471	l_inert,j_mem,N0_eq,N1_eq_exponentN1,l_inert1,firstJetIndex_mem_range,firstJet_lowerRank_eq,firstJet_upperRank_eq
 Formalism.L2.Col.Dat.Ok	Formalism.LocalToGlobal.Columns.AbelianHostFieldConditions	6	12	17		embeddingStarConj,f_eq,piG_cong,cond,chars,e_even
 GlobalTheory.LvT.PtModel.Coord.Ok	Development.AbelianVarietyTheory.Definitions.GlobalTwisting.FormsStable	3	5	17		B_on,off_act,S_off
 GlobalTheory.NRows.RowsC	Development.AbelianVarietyTheory.Definitions.GaloisGeometry.GoodIdempotentFixesOfOnlySeriesOfLabelActs	1	6	17	dga471 (#2100)	c4b
@@ -65,7 +65,7 @@ GlobalTheory.TwInputs.TwistedRealJoin	Development.AutomorphicArithmetic.ThetaCor
 GroundTheory.Heights₂.Heights.LowerBoundFree.CuspData	GroundTheory.HeightsAndTheta.Heights.HodgeLowerBound.FrameDefinitions.EqZeroOfIsIsoSub	9	15	16		alt,unimod,normSq_pos,form_le,lie_add,lie_smul,lie_le,inj,torus
 GlobalTheory.IndefiniteRowSideFullHecke.LatticesOverBalls.Keeps	Development.AbelianVarietyTheory.BlockTheory.TwistedDiscreteSeries.HeckeSupportLattices	5	7	15		eOp,typeP,good,overK,overL
 GroundTheory.Heights₂.Heights.IndefiniteRowSideFullHecke.Regular.RegChartData	GroundTheory.HeightsAndTheta.Heights.Regularisation.IsOpenKappaOpenNeighbourhood	5	18	15		φ_smooth,psh,φ_le,le_φ,grad
-Formalism.L2.Forms.SymmetricTwistedJointForms	Formalism.LocalToGlobal.HermitianForms.TiedTwJSym	5	8	14		J_g,J_off,yG_smul,y_inj,yQ_off
+Formalism.L2.Forms.SymmetricTwistedJointForms	Formalism.LocalToGlobal.HermitianForms.TiedTwJSym	5	8	14	dga471	J_g,J_off,yG_smul,y_inj,yQ_off
 Formalism.MainNotions.ModuliIntegralCharts.ExtA	Formalism.SharpRestriction.Divisibility.ModuliIntegralCharts	38	61	14	dga471	flagCl,allFlags,blowUp,Corr,IvD,spz,abP,inQ,isGenP,gpt,redK,genK,imgM,imgU,RFam,ptK,vpi,isoSec,isoSymm,lieL,eig,Wst,taut,nrmIn,iT,htC,htEval,htIdl,omPat,obMod,ysBd,hFl,flMem,flDim,locus,degGr,degGrQ,degGrD
 GlobalTheory.Fc.S0.UnitaryGroupThirdPlaceHypotheses	Development.AutomorphicArithmetic.ThetaCorrespondence.ThetaPairLifts.ThirdPlaceSeries.BernsteinUnitaryProductIrreducible	13	58	14		bernsteinUnitaryProductIrreducible,unlinkedProductIrreducible,depthZeroJacquetInjective,jacquetShalika,automorphicFormsFiniteGL,localGlobalAboveL,regularAlgebraicPurity,heckeLAdicParameterAbove,deRhamPotSemistable,rayCharacterArtin,genericUnitaryDualGL,standardCosocleGL,cheb
 Formalism.L2.NC.NormalizedCharacterCompatibility	Formalism.LocalToGlobal.NormalizedHeckeFactors.RingSpecSidedEmbeddingFixedField	3	8	13		del_fix,etaT_unr,etaT_inf
@@ -73,7 +73,7 @@ Formalism.L2.S.LocIso	Formalism.LocalToGlobal.SiegelLatticeTheory.EFSymmCont	12	
 Formalism.MainNotions.ColumnSystems.Pf.ColSys	Formalism.SharpRestriction.GrowthBounds.StandardPolynomials.ColsDef	1	24	13		oSum
 Formalism.MainNotions.FamP	Formalism.SharpRestriction.ParConsts	4	40	13		rrDef,off_eq,kapI_eq,ep_eq
 GlobalTheory.HeightCounting.NdSpec	Development.AbelianVarietyTheory.Definitions.AutomorphicMembership.RingSpecNormalisedCharacterEq	3	38	13		mx_max,bj_span,bj_rel
-GlobalTheory.Mem.Col2.KerRat.KernelsOver	Development.AbelianVarietyTheory.Proofs.IwasawaDecomposition.KernelsOverOfFamily	4	7	13		mat,cp1,top,cp2
+GlobalTheory.Mem.Col2.KerRat.KernelsOver	Development.AbelianVarietyTheory.Proofs.IwasawaDecomposition.KernelsOverOfFamily	4	7	13	dga471	mat,cp1,top,cp2
 GlobalTheory.Mem.Top.Bl.SpectralDataCompatible	Development.AutomorphicArithmetic.ThetaCorrespondence.ThetaPairLifts.ThirdPlaceSeries.CoreAltAltBis	13	19	13	dga471	host,g,twE,twGood,gal,exp,chiD,twF,types,cover,plB,thetaChr,pieces
 GlobalTheory.TwInputs.SerSide	Development.AbelianVarietyTheory.Definitions.NonGaloisDescent.UnivChar	3	16	13		U_eq,psi_eq,low
 CrystallineSemistableComparison.ComparisonOn	Development.WeilBound.CoreStatements.PadicHodgeComparison.EtaleCohomologyComparison.BocksteinBaseChange.HodgeTateFromSandwich	8	9	12	jennyyyyzhen (#2055)	lin,lin',fin,equi,inj,fil,strict,nat
@@ -188,7 +188,7 @@ GlobalTheory.FunObj.GridChoice.SumOK	Development.AbelianVarietyTheory.Definition
 GlobalTheory.Mem.Col2.PerIn.Ok	Development.AbelianVarietyTheory.Definitions.AutomorphicMembership.PredMemGamRanks	3	11	5		rep_til,H_idx,H_rat
 GlobalTheory.Mem.LiteralAutomorphy.LiteratureAutomorphyHypothesis	Development.AutomorphicArithmetic.AutomorphicVarieties.ModularityArgument.ThresholdArguments.DenseThresholdCases.LitAut	5	15	5		decay,hc,cusp,pur,ray
 GlobalTheory.Mem.Th.RecFun	Development.AbelianVarietyTheory.Definitions.AutomorphicMembership.AdelicDataRowMeasureScaleTrivialTuple	5	22	5		chr_inf,eta_unr,col,adelicDataRowMeasureScale_trivialTuple,mY_zero
-GlobalTheory.Mem.Th.WeilThetaCompatibility	Development.AbelianVarietyTheory.Definitions.AutomorphicMembership.ExistsSplittingCharacterSelf	9	9	5		range,Heisenberg₂,aut,cont,unit,split,twW,twV,th
+GlobalTheory.Mem.Th.WeilThetaCompatibility	Development.AbelianVarietyTheory.Definitions.AutomorphicMembership.ExistsSplittingCharacterSelf	9	9	5	dga471	range,Heisenberg₂,aut,cont,unit,split,twW,twV,th
 GlobalTheory.TowU.IsOp	Development.AbelianVarietyTheory.Definitions.Divisors.DblActId	1	9	5		theta
 GroundTheory.Heights₂.Heights.IndefiniteRowSideFullHecke.Regular.RegCharts	GroundTheory.HeightsAndTheta.Heights.Regularisation.IsOpenKappaOpenNeighbourhood	7	22	5		isOpen_alt,isOpen_alt_alt,θ_pot,om_pot,om_pos,q_smooth,q_θ
 PI.OrbJet.OJ.Loc1	Formalism.PeriodIntegrals.OrbJetBase	2	4	5		rank_lt_alt,nu_rows
@@ -250,7 +250,7 @@ Formalism.L2.Indef.IndefConv	Formalism.LocalToGlobal.IndefiniteForms.PairingCond
 Formalism.L2.Ker.Cd.KapChoice	Formalism.LocalToGlobal.KernelLattices.ColumnData	2	8	3		pp_over,gaP_at
 Formalism.L2.OmFrame	Formalism.LocalToGlobal.GaloisLevelStructure.TiedGal	1	3	3		comm
 Formalism.L2.Pj.LawsPi	Formalism.LocalToGlobal.ProjectiveLattices.DepLaws	3	6	3		page,sm,piHalf
-Formalism.L2.SG.Pf.Carrier.ModelsFor	Formalism.LocalToGlobal.SiegelLatticeTheory.FlagStabilizerTensors.RootLatticeThresholds.CarrierOf	9	9	3		L,j,lam,c,Cm,σ,Lw,Ll,Ll'
+Formalism.L2.SG.Pf.Carrier.ModelsFor	Formalism.LocalToGlobal.SiegelLatticeTheory.FlagStabilizerTensors.RootLatticeThresholds.CarrierOf	9	9	3	dga471	L,j,lam,c,Cm,σ,Lw,Ll,Ll'
 Formalism.L2.Theta.RealTied	Formalism.LocalToGlobal.BesselHermitianTheta.MinfDensity	1	4	3		dsig
 Formalism.MainNotions.ModuliIntegralCharts.Prov	Formalism.SharpRestriction.Divisibility.ModuliIntegralCharts	13	23	3		jj_range,NgC_ne,kfNorm,pbKF,levIn,bc,effD,noVertD,posBdD,ampleOnAbelianBase,nefFib,ampleGen,limRA
 Formalism.WachCohomologyFacts.Base	Formalism.FrobeniusContraction.Statement	5	14	3		hc,comm,γ_bij,hγX,γ_modX
@@ -396,7 +396,7 @@ Formalism.L2.DIV.LvlTie	Formalism.LocalToGlobal.Divisibility.RowSideTie	1	7	1		c
 Formalism.L2.FormalSeriesBounds.Plan	Formalism.LocalToGlobal.CharacterGerms.ValuationChoiceHypothesis	1	4	1		supp
 Formalism.L2.FormalSeriesBounds.RF.DegHyp2	Formalism.LocalToGlobal.CharacterGerms.RestNonneg	1	8	1		rest_nonneg
 Formalism.L2.FormalSeriesBounds.SelfData	Formalism.LocalToGlobal.CharacterGerms.RowTieSelf	1	22	1		hd_ne
-Formalism.L2.Forms.TwAtT	Formalism.LocalToGlobal.HermitianForms.TiedTw	8	10	1		psiT,rhoT,Mu0,duStar,Dstar,GamP,tauOf,seenP
+Formalism.L2.Forms.TwAtT	Formalism.LocalToGlobal.HermitianForms.TiedTw	8	10	1	dga471	psiT,rhoT,Mu0,duStar,Dstar,GamP,tauOf,seenP
 Formalism.L2.G.GChartTie	Formalism.LocalToGlobal.GroupLattices.LevelCharts.LevelsOfChChartsCover	1	12	1		em_inj
 Formalism.L2.Herm.StepLevel	Formalism.LocalToGlobal.HermitianColumns.InLocalDiscriminantKernel	5	13	1		Lb_span,Lb_index,Uloc_g,UlocAlt,U_eq
 Formalism.L2.Herm.SymmetricAdelicCompatibility	Formalism.LocalToGlobal.HermitianColumns.SymAll	6	6	1		up0,upI,dn0,dnI,dil0,dilI
