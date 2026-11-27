@@ -22,11 +22,13 @@ decls() { tail -n +2 "$1" | cut -f7 | tr ';' '\n' | grep -v "^$" | LC_ALL=C sort
 # 1. unreachable mode
 fl --mode unreachable "$TMP/u" >/dev/null
 expect "unreachable: plan" \
-  "$(printf "%s\n" Fix.instUnused Fix.unusedDef_spec Fix.unusedRec Fix.unusedRec.go Fix.unused_open Fix.uses_mentioned "private Fix.private_unused" | LC_ALL=C sort | tr "\n" " ")" \
+  "$(printf "%s\n" Fix.instUnused Fix.twice_def Fix.unusedDef_spec Fix.unusedRec Fix.unusedRec.go Fix.unused_open Fix.uses_mentioned "private Fix.private_unused" | LC_ALL=C sort | tr "\n" " ")" \
   "$(decls "$TMP/u/prune-plan.tsv")"
-python3 "$APPLY" "$TMP/u/prune-plan.tsv" --apply --out "$TMP/del.txt" >/dev/null
+python3 "$APPLY" "$TMP/u/prune-plan.tsv" --apply --out "$TMP/del.txt" >/dev/null 2>&1
+expect "unreachable: rfl theorem used by simp only kept" "1" "$(grep -c '^theorem twice_def' Fix/Basic.lean)"
 expect "unreachable: open … in prefix removed" "0" "$(grep -c '^open Nat in' Fix/Basic.lean || true)"
-expect "unreachable: notation and its target kept" "2" "$(grep -c 'unusedDef' Fix/Basic.lean)"
+expect "unreachable: notation and its target kept" "1" "$(grep -c '^scoped notation' Fix/Basic.lean)"
+expect "unreachable: rfl simp lemma and coercion kept" "2" "$(grep -cE '^(@\[simp\] theorem unusedDef_zero|instance instCoeBoolNat)' Fix/Basic.lean)"
 expect "unreachable: pruned tree builds" "0" "$(lake build -q >/dev/null 2>&1; echo $?)"
 cp "$TMP/Basic.lean" Fix/Basic.lean
 
@@ -37,6 +39,6 @@ sed -i '/^  big : n ≠ 1000$/d; s/⟨by decide, helper_for_big⟩/⟨by decide�
 lake build -q
 fl --before "$TMP/before.txt" "$TMP/f2" >/dev/null
 expect "fields --before: plan" "Fix.helper_for_big " "$(decls "$TMP/f2/prune-plan.tsv")"
-python3 "$APPLY" "$TMP/f2/prune-plan.tsv" --apply --out "$TMP/del.txt" >/dev/null
+python3 "$APPLY" "$TMP/f2/prune-plan.tsv" --apply --out "$TMP/del.txt" >/dev/null 2>&1
 expect "fields --before: pruned tree builds" "0" "$(lake build -q >/dev/null 2>&1; echo $?)"
 exit $fail

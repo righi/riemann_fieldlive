@@ -47,4 +47,16 @@ instance instUnused : Inhabited (Fin 3) := ⟨0⟩
 /-- A notation is meta code: it is kept even though no proof term mentions it. -/
 scoped notation "⟪" n "⟫" => unusedDef n
 
+/-- Unreachable, but an `rfl` simp lemma: `dsimp` uses such lemmas without a trace, so it stays. -/
+@[simp] theorem unusedDef_zero : unusedDef 0 = 1 := rfl
+
+/-- Unreachable, but a coercion: coercions are unfolded where they are used, so it stays. -/
+instance instCoeBoolNat : Coe Bool Nat := ⟨fun b => if b then 1 else 0⟩
+
+def twice (n : Nat) : Nat := n + n
+
+/-- Proved by `rfl` and used only through `simp only [twice_def]`, which leaves no trace in the
+proof term: the plan marks it for the text check, which finds the use and keeps it. -/
+theorem twice_def (n : Nat) : twice n = n + n := rfl
+
 end Fix

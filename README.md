@@ -58,11 +58,23 @@ lake env /path/to/fieldlive/lean/.lake/build/bin/fieldlive [OPTIONS] OUTDIR
 Without `--root`, `--root-module` or `--roots-file`, the roots are the declarations of the
 `--import` modules. The root modules are always protected.
 
-Some declarations are used in ways kernel terms do not show, so they are treated as roots too:
-meta code (syntax, notations, macros, elaborators, unexpanders), declarations that meta code
-names by literal (the target of a `notation`, for example), and `implemented_by` targets.
-Delete only what the plan lists and build afterwards; anything the build then rejects is a case
-the analysis missed and should be reported.
+Some declarations are used in ways kernel terms do not show, so they are kept as roots too:
+
+- meta code (syntax, notations, macros, elaborators, unexpanders), and the declarations meta code
+  names by literal (the target of a `notation`, for example);
+- `implemented_by` targets;
+- simp lemmas proved by `rfl` and definitions marked for simp to unfold, since `dsimp` uses them by
+  unfolding;
+- coercion instances (`Coe`, `CoeFun`, `CoeSort`, …, scoped or not), since inserting a coercion
+  unfolds the instance away.
+
+Any other theorem proved by `rfl` can be used by `simp only [h]` or `dsimp only [h]` without a
+trace in the proof term. The plan marks such rows `text`, and `apply-plan.py` deletes them only if
+their name is written nowhere else in the sources.
+
+Loading the simp sets and instances runs the imported modules' initializers, as building the
+project does. Delete only what the plan lists and build afterwards; anything the build then
+rejects is a case the analysis missed and should be reported.
 
 ## Deleting unreachable declarations
 
@@ -78,7 +90,8 @@ last line, together with everything Lean generated from it (equation lemmas, `ma
 `_proof_` auxiliaries, `where` helpers, structure projections). A row is in the plan only when
 the declaration holds something unreachable and nothing reachable, and no declaration that stays
 mentions any part of it; the rows held back for that last reason, and what mentions them, are in
-`plan-kept.tsv`. `apply-plan.py` also removes the `open … in`-style lines that apply only to a
+`plan-kept.tsv`. Run `apply-plan.py` from the project root (or pass `--src`), so the text check
+sees all the sources. It also removes the `open … in`-style lines that apply only to a
 deleted declaration, and skips (and reports) any range that shares a line with other code.
 
 ## Removing dead fields and unused arguments
@@ -101,7 +114,7 @@ same way.
 
 | File | What it is |
 |---|---|
-| `prune-plan.tsv` | file, module, start line and column, end line and column, declarations: the ranges to delete |
+| `prune-plan.tsv` | file, module, start line and column, end line and column, declarations, check (`exact`, or `text` for theorems proved by `rfl`): the ranges to delete |
 | `plan-kept.tsv` | declarations left out of the plan, and the declaration that stays and mentions them |
 | `dead-fields.tsv` | structure, field, is-Prop, field index, number of fields, construction sites held back |
 | `field-reach.tsv` | structure, field, count, then the declarations only that field keeps alive |

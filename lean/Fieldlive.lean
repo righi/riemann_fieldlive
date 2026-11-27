@@ -525,6 +525,45 @@ def namedByMeta (env : Environment) (isProj : Name → Bool) : Array Name := Id.
         | _ => pure ()
   return out.toArray
 
+/-- project declarations that elaboration uses without leaving a reference in the kernel terms.
+Returns
+* `keep`: simp lemmas proved by `rfl` (`dsimp` applies them by unfolding), definitions simp unfolds,
+  and coercion instances (`Coe`, `CoeFun`, `CoeSort`, …, scoped or not: coercion insertion unfolds
+  them away). They are kept as roots, with the counts of the two kinds.
+* `rflThms`: the other theorems proved by `rfl`. `simp only [h]` and `dsimp only [h]` use such a
+  theorem without a trace, so the plan marks them for a check of the source text. -/
+def elabOnly (env : Environment) (isProj : Name → Bool) :
+    IO (Array Name × Nat × Nat × NameSet) := do
+  let act : CoreM (Array Name × NameSet) := do
+    let mut out : NameSet := {}
+    for (_, ext) in ← Meta.simpExtensionMapRef.get do
+      let ts ← ext.getTheorems
+      for t in ts.pre.values ++ ts.post.values do
+        if t.rfl then
+          if let .decl n .. := t.origin then
+            if isProj n then out := out.insert n
+      for n in ts.toUnfold.toList do
+        if isProj n then out := out.insert n
+    let mut rfls : NameSet := {}
+    for (n, ci) in (← getEnv).constants.toList do
+      if let .thmInfo _ := ci then
+        if isProj n && !out.contains n then
+          if ← Meta.isRflTheorem n then rfls := rfls.insert n
+    return (out.toArray, rfls)
+  let (simpRfl, rfls) ← try
+      let (r, _) ← act.toIO { fileName := "<fieldlive>", fileMap := default, maxHeartbeats := 0 } { env }
+      pure r
+    catch e =>
+      IO.eprintln s!"warning: could not read the simp sets: {e}"
+      pure (#[], {})
+  let mut coes : Array Name := #[]
+  for (n, ci) in env.constants.toList do
+    if !isProj n then continue
+    if let .thmInfo _ := ci then continue
+    if let some c := ci.type.getForallBody.getAppFn.constName? then
+      if c.getPrefix.isAnonymous && c.toString.startsWith "Coe" then coes := coes.push n
+  return (simpRfl ++ coes, simpRfl.size, coes.size, rfls)
+
 /-! ## Source ranges and the prune plan -/
 
 structure Range where
@@ -591,7 +630,7 @@ def usedBy (env : Environment) (n : Name) : NameSet := Id.run do
 constant and nothing live; then, until nothing changes, a deleted unit comes back when a constant
 that stays (outside every deleted unit) mentions one of its constants. Returns (deleted, kept). -/
 def writePlan (env : Environment) (modNames : Array Name) (outdir : String) (isProj : Name → Bool)
-    (dropped live : Std.HashSet Name) : IO (Nat × Nat) := do
+    (dropped live : Std.HashSet Name) (textCheck : NameSet) : IO (Nat × Nat) := do
   let consts := env.constants.fold (init := #[]) fun acc n _ => if isProj n then acc.push n else acc
   let (unitOf, us) := units env modNames consts
   let mut members : Array (Array Name) := Array.replicate us.size #[]
@@ -624,7 +663,7 @@ def writePlan (env : Environment) (modNames : Array Name) (outdir : String) (isP
   kept.flush
   let sp ← getSrcSearchPath
   let pl ← IO.FS.Handle.mk (outdir ++ "/prune-plan.tsv") .write
-  pl.putStrLn "file\tmodule\tstart_line\tstart_col\tend_line\tend_col\tdeclarations"
+  pl.putStrLn "file\tmodule\tstart_line\tstart_col\tend_line\tend_col\tdeclarations\tcheck"
   let mut nDel := 0
   for u in [0:us.size] do
     unless del[u]! do continue
@@ -637,7 +676,8 @@ def writePlan (env : Environment) (modNames : Array Name) (outdir : String) (isP
       match privateToUserName? n with
       | some m => some s!"private {nm m}"
       | none => if n.isInternalDetail then none else some (nm n)
-    pl.putStrLn s!"{file}\t{nm r.mod}\t{r.sl}\t{r.sc}\t{r.el}\t{r.ec}\t{";".intercalate names.toList}"
+    let check := if members[u]!.any textCheck.contains then "text" else "exact"
+    pl.putStrLn s!"{file}\t{nm r.mod}\t{r.sl}\t{r.sc}\t{r.el}\t{r.ec}\t{";".intercalate names.toList}\t{check}"
   pl.flush
   return (nDel, nKept)
 
@@ -652,8 +692,10 @@ unsafe def mainImpl (args : List String) : IO UInt32 := do
       return 2
   let outdir := cfg.outdir
   initSearchPath (← findSysroot)
+  -- loading the extensions (simp sets, instances) runs the imported modules' initializers
+  enableInitializersExecution
   IO.eprintln s!"importing {cfg.imports.toList} ..."
-  let env ← importModules (cfg.imports.map fun m => { module := m }) {} (leakEnv := true)
+  let env ← importModules (cfg.imports.map fun m => { module := m }) {} (leakEnv := true) (loadExts := true)
   let modNames := env.allImportedModuleNames
   IO.eprintln s!"imported {modNames.size} modules"
   let projMods ← projectModules modNames cfg.projectRoots
@@ -678,7 +720,9 @@ unsafe def mainImpl (args : List String) : IO UInt32 := do
     if let some t := Compiler.getImplementedBy? env n then roots := roots.push t
   let named := namedByMeta env isProject
   roots := roots ++ named
-  IO.eprintln s!"roots: {roots.size} ({nMeta} meta declarations, {named.size} declarations named by meta code)"
+  let (eo, nSimp, nCoe, rflThms) ← elabOnly env isProject
+  roots := roots ++ eo
+  IO.eprintln s!"roots: {roots.size} ({nMeta} meta declarations, {named.size} named by meta code, {nSimp} rfl simp lemmas or unfolded definitions, {nCoe} coercion instances)"
   -- candidates
   let mut cands : Array Cand := #[]
   let mut candOfInd : Std.HashMap Name Nat := {}
@@ -786,7 +830,7 @@ unsafe def mainImpl (args : List String) : IO UInt32 := do
     | none => pure liveBase
   let plan (live : Std.HashSet Name) (dropped : Std.HashSet Name) : IO Unit := do
     if !cfg.plan then return
-    let (nDel, nKept) ← writePlan env modNames outdir isProject dropped live
+    let (nDel, nKept) ← writePlan env modNames outdir isProject dropped live rflThms
     IO.eprintln s!"prune plan: {nDel} declarations to delete; {nKept} kept because code that stays mentions them"
   let droppedSet (live : Std.HashSet Name) : Std.HashSet Name :=
     pool.fold (init := {}) fun s n => if !live.contains n && env.contains n && isProject n then s.insert n else s
