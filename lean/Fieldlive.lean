@@ -349,23 +349,332 @@ def writeDropped (env : Environment) (outdir : String) (isProj : Name → Bool) 
   de.flush
   return dropped
 
+/-! ## Command line -/
+
+structure Config where
+  outdir : String := ""
+  /-- `fields` (dead structure fields), `args` (unused theorem arguments) or `unreachable` -/
+  mode : String := "fields"
+  imports : Array Name := #[]
+  roots : Array Name := #[]
+  rootModules : Array Name := #[]
+  /-- top-level module names of the project; empty: detect from where the `.olean` files live -/
+  projectRoots : Array Name := #[]
+  /-- modules (or module prefixes) whose declarations are kept and never edited -/
+  protect : Array Name := #[]
+  only? : Option String := none
+  deep : Bool := false
+  paths : Bool := false
+  liveOnly : Bool := false
+  liveOut? : Option String := none
+  before? : Option String := none
+  plan : Bool := true
+
+def usage : String := "usage: fieldlive [OPTIONS] OUTDIR
+
+Walks the kernel terms of the declarations reachable from the root theorems of a built Lean
+project and reports what they do not need. Run it with `lake env` in the project, so that
+LEAN_PATH points at the project's .olean files.
+
+  --mode MODE           fields (default): fields of project structures nothing reads
+                        args: explicit Prop arguments of theorems their proofs never use
+                        unreachable: project declarations the roots do not need at all
+  --import MOD          module to load (repeatable; default: the root modules, or Main)
+  --root NAME           a root declaration (repeatable)
+  --root-module MOD     every declaration of MOD is a root (repeatable). Without --root or
+                        --root-module, the declarations of the --import modules are the roots.
+  --roots-file FILE     root declarations, one per line
+  --project MOD         top-level module name of the project (repeatable). Default: every module
+                        whose .olean is outside the toolchain and outside .lake/packages.
+  --protect MOD         keep every declaration of MOD and of modules under it; in args mode its
+                        theorems are not candidates (repeatable; the root modules always are)
+  --only FILE           only these fields (Structure<TAB>field) or arguments (theorem<TAB>index)
+                        may be dropped
+  --live-out FILE       write the baseline live project constants (a snapshot before an edit)
+  --before FILE         such a snapshot: report what an edit freed (fields and args modes)
+  --no-plan             do not write prune-plan.tsv
+  --deep                also walk into library constants (slower, same project results)
+  --paths               write parents.tsv, a shortest reference path to every live constant
+  --live-only           skip the baseline; write only the live set (fields mode)
+
+The legacy form `fieldlive OUTDIR PROJECT_ROOTS_FILE [ROOT...]` and the FIELDLIVE_* environment
+variables still work."
+
+/-- parse the command line, then fill in the legacy environment variables -/
+def parseArgs (args : List String) : IO (Except String Config) := do
+  let mut c : Config := {}
+  let mut pos : Array String := #[]
+  let mut rest := args
+  let valued := ["--mode", "--import", "--root", "--root-module", "--project", "--protect", "--only",
+    "--live-out", "--before", "--roots-file"]
+  repeat
+    match rest with
+    | [] => break
+    | a :: r =>
+      rest := r
+      if valued.contains a then
+        let v :: r' := rest | return .error s!"{a} needs an argument"
+        rest := r'
+        match a with
+        | "--mode" => c := { c with mode := v }
+        | "--import" => c := { c with imports := c.imports.push v.toName }
+        | "--root" => c := { c with roots := c.roots.push v.toName }
+        | "--root-module" => c := { c with rootModules := c.rootModules.push v.toName }
+        | "--project" => c := { c with projectRoots := c.projectRoots.push v.toName }
+        | "--protect" => c := { c with protect := c.protect.push v.toName }
+        | "--only" => c := { c with only? := some v }
+        | "--live-out" => c := { c with liveOut? := some v }
+        | "--before" => c := { c with before? := some v }
+        | _ =>
+          for l in ← IO.FS.lines v do
+            let t := l.trimAscii.toString
+            if !t.isEmpty then c := { c with roots := c.roots.push t.toName }
+      else match a with
+        | "--no-plan" => c := { c with plan := false }
+        | "--deep" => c := { c with deep := true }
+        | "--paths" => c := { c with paths := true }
+        | "--live-only" => c := { c with liveOnly := true }
+        | "-h" | "--help" => return .error ""
+        | _ =>
+          if a.startsWith "--" then return .error s!"unknown option {a}"
+          pos := pos.push a
+  let some outdir := pos[0]? | return .error "missing OUTDIR"
+  c := { c with outdir }
+  -- legacy: OUTDIR PROJECT_ROOTS_FILE [ROOT...]
+  if let some (f : String) := pos[1]? then
+    let ls ← IO.FS.lines f
+    c := { c with projectRoots := ls.foldl (fun acc l => if l.isEmpty then acc else acc.push l.toName) c.projectRoots }
+    c := { c with roots := c.roots ++ (pos.extract 2 pos.size).map String.toName }
+  if let some m ← IO.getEnv "FIELDLIVE_MODULE" then c := { c with imports := c.imports.push m.toName }
+  if let some m ← IO.getEnv "FIELDLIVE_MODE" then c := { c with mode := m }
+  if let some f ← IO.getEnv "FIELDLIVE_ONLY" then c := { c with only? := c.only?.getD f }
+  if let some f ← IO.getEnv "FIELDLIVE_LIVE_OUT" then c := { c with liveOut? := c.liveOut?.getD f }
+  if let some f ← IO.getEnv "FIELDLIVE_BEFORE" then c := { c with before? := c.before?.getD f }
+  if (← IO.getEnv "FIELDLIVE_DEEP").isSome then c := { c with deep := true }
+  if (← IO.getEnv "FIELDLIVE_PATHS").isSome then c := { c with paths := true }
+  if (← IO.getEnv "FIELDLIVE_LIVE_ONLY").isSome then c := { c with liveOnly := true }
+  unless ["fields", "args", "unreachable"].contains c.mode do return .error s!"unknown mode {c.mode}"
+  if c.imports.isEmpty then
+    c := { c with imports := if c.rootModules.isEmpty then #[`Main] else c.rootModules }
+  return .ok c
+
+/-! ## Project detection and extra roots -/
+
+/-- modules of the project: under one of `roots` if given, otherwise every module whose `.olean`
+is neither in the toolchain nor in a Lake dependency (`.lake/packages/`) -/
+def projectModules (modNames : Array Name) (roots : Array Name) : IO (Std.HashSet Name) := do
+  if !roots.isEmpty then
+    return modNames.foldl (fun s m => if roots.contains m.getRoot then s.insert m else s) {}
+  let sysroot := (← findSysroot).toString
+  let mut s : Std.HashSet Name := {}
+  for m in modNames do
+    let p := (← findOLean m).toString
+    if p.startsWith sysroot || (p.splitOn "/.lake/packages/").length > 1 then continue
+    s := s.insert m
+  return s
+
+/-- whether `m` is `p` or a module under `p` -/
+def underModule (ps : Array Name) (m : Name) : Bool := ps.any (·.isPrefixOf m)
+
+/-- declarations used in ways kernel terms do not show: meta code (syntax, macros, elaborators,
+tactics), `implemented_by` targets. They are kept as roots. -/
+def isMetaLike (env : Environment) (n : Name) (ci : ConstantInfo) : Bool :=
+  isMarkedMeta env n ||
+  ci.type.getUsedConstants.any fun c =>
+    [`Lean.Syntax, `Lean.ParserDescr, `Lean.TrailingParserDescr, `Lean.Macro, `Lean.Elab,
+     `Lean.Meta, `Lean.Parser, `Lean.PrettyPrinter].any (·.isPrefixOf c)
+
+/-- the name a closed `Lean.Name` expression builds, as meta code writes name literals -/
+partial def exprToName? (e : Expr) : Option Name :=
+  let strs (as : Array Expr) : Option (Array String) := as.mapM fun | .lit (.strVal s) => some s | _ => none
+  match e.getAppFn, e.getAppArgs with
+  | .const ``Name.anonymous _, #[] => some .anonymous
+  | .const c _, as =>
+    if c == ``Name.str || c == ``Name.mkStr then
+      match as with
+      | #[p, .lit (.strVal s)] => (exprToName? p).map (·.str s)
+      | _ => none
+    else
+    if (c.getPrefix == ``Name) && (c.toString.startsWith "Lean.Name.mkStr") then
+      (strs as).map fun ss => ss.foldl (·.str ·) .anonymous
+    else none
+  | _, _ => none
+
+/-- project declarations that meta code names by a literal (notations, macros, unexpanders) -/
+def namedByMeta (env : Environment) (isProj : Name → Bool) : Array Name := Id.run do
+  let mut out : NameSet := {}
+  for (n, ci) in env.constants.toList do
+    if !isProj n then continue
+    unless isMetaLike env n ci || ci.type.getUsedConstants.contains ``Name do continue
+    let some v := ci.value? (allowOpaque := true) | continue
+    let mut st := #[v]
+    while h : st.size > 0 do
+      let e := st.back
+      st := st.pop
+      match exprToName? e with
+      | some m => if !m.isAnonymous && env.contains m && isProj m then out := out.insert m
+      | none =>
+        match e with
+        | .app f a | .lam _ f a _ | .forallE _ f a _ => st := st.push f |>.push a
+        | .letE _ t x b _ => st := st.push t |>.push x |>.push b
+        | .mdata _ b | .proj _ _ b => st := st.push b
+        | _ => pure ()
+  return out.toArray
+
+/-! ## Source ranges and the prune plan -/
+
+structure Range where
+  mod : Name
+  sl : Nat
+  sc : Nat
+  el : Nat
+  ec : Nat
+  deriving BEq, Hashable, Inhabited
+
+def declRange? (env : Environment) (n : Name) : Option DeclarationRange :=
+  let r := declRangeExt.find? (level := .exported) env n <|> declRangeExt.find? (level := .server) env n
+  r.map (·.range)
+
+/-- the units a deletion works on: each declaration whose source range is not inside another's,
+with every constant whose range lies inside it or which has no range but whose name extends it
+(equation lemmas, `match_` and `_proof_` auxiliaries, projections, `where` helpers). -/
+def units (env : Environment) (modNames : Array Name) (consts : Array Name) :
+    Std.HashMap Name Nat × Array Range := Id.run do
+  let mut rangeOf : Std.HashMap Name Range := {}
+  for n in consts do
+    let some i := env.getModuleIdxFor? n | continue
+    let some r := declRange? env n | continue
+    rangeOf := rangeOf.insert n { mod := modNames[i.toNat]!, sl := r.pos.line, sc := r.pos.column,
+                                  el := r.endPos.line, ec := r.endPos.column }
+  -- outermost ranges, per module: sort by start, longest first, and sweep
+  let rs := (rangeOf.fold (init := (#[] : Array Range)) fun a _ r => a.push r).qsort fun a b =>
+    if a.mod != b.mod then a.mod.lt b.mod
+    else if a.sl != b.sl then a.sl < b.sl
+    else if a.sc != b.sc then a.sc < b.sc
+    else if a.el != b.el then a.el > b.el
+    else a.ec > b.ec
+  let mut outer : Std.HashMap Range Nat := {}
+  let mut us : Array Range := #[]
+  for r in rs do
+    if outer.contains r then continue
+    match us.back? with
+    | some u =>
+      if u.mod == r.mod && (u.sl < r.sl || (u.sl == r.sl && u.sc ≤ r.sc)) && (r.el < u.el || (r.el == u.el && r.ec ≤ u.ec)) then
+        outer := outer.insert r (us.size - 1)
+      else outer := outer.insert r us.size; us := us.push r
+    | none => outer := outer.insert r us.size; us := us.push r
+  let mut unitOf : Std.HashMap Name Nat := {}
+  for n in consts do
+    if let some r := rangeOf[n]? then unitOf := unitOf.insert n outer[r]!
+  for n in consts do
+    if unitOf.contains n then continue
+    let mut p := n.getPrefix
+    while !p.isAnonymous do
+      if let some u := unitOf[p]? then unitOf := unitOf.insert n u; break
+      p := p.getPrefix
+  return (unitOf, us)
+
+/-- constants a constant's declaration mentions (an inductive: also its constructors' types) -/
+def usedBy (env : Environment) (n : Name) : NameSet := Id.run do
+  let some ci := env.find? n | return {}
+  let mut used := ci.getUsedConstantsAsSet
+  if let .inductInfo I := ci then
+    for cn in I.ctors do
+      if let some cc := env.find? cn then used := used.union cc.getUsedConstantsAsSet
+  return used
+
+/-- `prune-plan.tsv`: the source ranges to delete. A unit is deleted when it holds a dropped
+constant and nothing live; then, until nothing changes, a deleted unit comes back when a constant
+that stays (outside every deleted unit) mentions one of its constants. Returns (deleted, kept). -/
+def writePlan (env : Environment) (modNames : Array Name) (outdir : String) (isProj : Name → Bool)
+    (dropped live : Std.HashSet Name) : IO (Nat × Nat) := do
+  let consts := env.constants.fold (init := #[]) fun acc n _ => if isProj n then acc.push n else acc
+  let (unitOf, us) := units env modNames consts
+  let mut members : Array (Array Name) := Array.replicate us.size #[]
+  for (n, u) in unitOf do members := members.modify u (·.push n)
+  let mut del : Array Bool := Array.replicate us.size false
+  for u in [0:us.size] do
+    let ms := members[u]!
+    if ms.any dropped.contains && !ms.any live.contains then del := del.set! u true
+  -- constants that stay but are not live: they still have to compile
+  let mut work : Array Name := #[]
+  for n in consts do
+    if live.contains n then continue
+    match unitOf[n]? with
+    | some u => if !del[u]! then work := work.push n
+    | none => work := work.push n
+  let kept ← IO.FS.Handle.mk (outdir ++ "/plan-kept.tsv") .write
+  kept.putStrLn "constant\tmentioned_by"
+  let mut nKept := 0
+  while h : work.size > 0 do
+    let n := work.back
+    work := work.pop
+    for m in usedBy env n do
+      let some u := unitOf[m]? | continue
+      if del[u]! then
+        del := del.set! u false
+        nKept := nKept + 1
+        kept.putStrLn s!"{nm m}\t{nm n}"
+        for k in members[u]! do
+          if !live.contains k then work := work.push k
+  kept.flush
+  let sp ← getSrcSearchPath
+  let pl ← IO.FS.Handle.mk (outdir ++ "/prune-plan.tsv") .write
+  pl.putStrLn "file\tmodule\tstart_line\tstart_col\tend_line\tend_col\tdeclarations"
+  let mut nDel := 0
+  for u in [0:us.size] do
+    unless del[u]! do continue
+    nDel := nDel + 1
+    let r := us[u]!
+    let file := match ← sp.findModuleWithExt "lean" r.mod with
+      | some f => f.toString
+      | none => ""
+    let names := members[u]!.filterMap fun n =>
+      match privateToUserName? n with
+      | some m => some s!"private {nm m}"
+      | none => if n.isInternalDetail then none else some (nm n)
+    pl.putStrLn s!"{file}\t{nm r.mod}\t{r.sl}\t{r.sc}\t{r.el}\t{r.ec}\t{";".intercalate names.toList}"
+  pl.flush
+  return (nDel, nKept)
+
+/-! ## Main -/
+
 unsafe def mainImpl (args : List String) : IO UInt32 := do
-  let outdir :: rootsFile :: rest := args | IO.eprintln "usage: fieldlive OUTDIR PROJECT_ROOTS_FILE [ROOT...]"; return 2
-  let roots : List Name := if rest.isEmpty then
-      [`riemannHypothesis, `riemannZeta_eq_zero_re, `LFunction_ne_zero_of_half_lt_re,
-       `LFunction_eq_zero_re, `LFunction_eq_zero_re_of_isPrimitive]
-    else rest.map String.toName
-  let projRoots : Std.HashSet Name := (← IO.FS.lines rootsFile).foldl
-    (fun s l => if l.isEmpty then s else s.insert l.toName) {}
+  let cfg ← match ← parseArgs args with
+    | .ok c => pure c
+    | .error e =>
+      unless e.isEmpty do IO.eprintln s!"fieldlive: {e}"
+      IO.eprintln usage
+      return 2
+  let outdir := cfg.outdir
   initSearchPath (← findSysroot)
-  let mainMod := ((← IO.getEnv "FIELDLIVE_MODULE").getD "Main").toName
-  IO.eprintln s!"importing {mainMod} ..."
-  let env ← importModules #[{ module := mainMod }] {} (leakEnv := true)
+  IO.eprintln s!"importing {cfg.imports.toList} ..."
+  let env ← importModules (cfg.imports.map fun m => { module := m }) {} (leakEnv := true)
   let modNames := env.allImportedModuleNames
   IO.eprintln s!"imported {modNames.size} modules"
+  let projMods ← projectModules modNames cfg.projectRoots
+  IO.eprintln s!"project modules: {projMods.size}"
   let isProject (n : Name) : Bool := match env.getModuleIdxFor? n with
-    | some i => projRoots.contains (modNames[i.toNat]!).getRoot
+    | some i => projMods.contains modNames[i.toNat]!
     | none => true
+  let modOf (n : Name) : Option Name := (env.getModuleIdxFor? n).map fun i => modNames[i.toNat]!
+  let rootMods := if cfg.rootModules.isEmpty && cfg.roots.isEmpty then cfg.imports else cfg.rootModules
+  let protect := cfg.protect ++ rootMods
+  let isProtected (n : Name) : Bool := match modOf n with
+    | some m => underModule protect m
+    | none => false
+  -- roots: the named declarations, every declaration of a root or protected module, and meta code
+  let mut roots : Array Name := cfg.roots.filter env.contains
+  IO.eprintln s!"roots named: {roots.size} of {cfg.roots.size} found"
+  let mut nMeta := 0
+  for (n, ci) in env.constants.toList do
+    if !isProject n then continue
+    if isProtected n && !n.isInternalDetail then roots := roots.push n
+    else if isMetaLike env n ci then roots := roots.push n; nMeta := nMeta + 1
+    if let some t := Compiler.getImplementedBy? env n then roots := roots.push t
+  let named := namedByMeta env isProject
+  roots := roots ++ named
+  IO.eprintln s!"roots: {roots.size} ({nMeta} meta declarations, {named.size} declarations named by meta code)"
   -- candidates
   let mut cands : Array Cand := #[]
   let mut candOfInd : Std.HashMap Name Nat := {}
@@ -375,7 +684,7 @@ unsafe def mainImpl (args : List String) : IO UInt32 := do
     match ci with | .inductInfo v => acc.push v | _ => acc
   for I in inds do
     if I.ctors.length != 1 || I.numIndices != 0 || I.isRec || I.all.length != 1 then continue
-    if !isProject I.name then continue
+    if !isProject I.name || isProtected I.name then continue
     let some (.ctorInfo ct) := env.find? I.ctors.head! | continue
     if ct.numFields == 0 then continue
     let mut read := Array.replicate ct.numFields false
@@ -402,28 +711,25 @@ unsafe def mainImpl (args : List String) : IO UInt32 := do
     cands := cands.push { ind := I.name, ctor := ct.name, nParams := ct.numParams, nFields := ct.numFields,
                           prop := resultIsProp I.type, read, pend := Array.replicate ct.numFields #[],
                           fieldNames := names }
-  IO.eprintln s!"candidate structures: {cands.size}"
-  -- FIELDLIVE_ONLY=file of "Structure<TAB>field" lines: only those fields may be dropped
-  if let some only ← IO.getEnv "FIELDLIVE_ONLY" then
-    let allow : Std.HashSet String := (← IO.FS.lines only).foldl (fun s l => if l.isEmpty then s else s.insert l) {}
-    let mut kept := 0
-    for i in [0:cands.size] do
-      let c := cands[i]!
-      for k in [0:c.nFields] do
-        if allow.contains s!"{nm c.ind}\t{nm c.fieldNames[k]!}" then kept := kept + 1
-        else cands := cands.modify i fun c => { c with read := c.read.set! k true }
-    IO.eprintln s!"FIELDLIVE_ONLY: {kept} fields may be dropped"
-  let rootsFound := roots.filter env.contains
-  IO.eprintln s!"roots found: {rootsFound.length} of {roots.length}"
-  let deep := (← IO.getEnv "FIELDLIVE_DEEP").isSome
+  if cfg.mode != "fields" then
+    cands := cands.map fun c => { c with read := c.read.map fun _ => true }
+  else
+    IO.eprintln s!"candidate structures: {cands.size}"
+    if let some only := cfg.only? then
+      let allow : Std.HashSet String := (← IO.FS.lines only).foldl (fun s l => if l.isEmpty then s else s.insert l) {}
+      let mut kept := 0
+      for i in [0:cands.size] do
+        let c := cands[i]!
+        for k in [0:c.nFields] do
+          if allow.contains s!"{nm c.ind}\t{nm c.fieldNames[k]!}" then kept := kept + 1
+          else cands := cands.modify i fun c => { c with read := c.read.set! k true }
+      IO.eprintln s!"--only: {kept} fields may be dropped"
+  let deep := cfg.deep
   IO.eprintln s!"walk: {if deep then "deep (into library constants)" else "project constants only"}"
-  -- FIELDLIVE_PATHS=1: record references during the field-mode walk; write a BFS parent tree
-  let paths := (← IO.getEnv "FIELDLIVE_PATHS").isSome
-  -- FIELDLIVE_LIVE_ONLY=1: skip the baseline; write only the field-mode live set (and the tree)
-  let liveOnly := (← IO.getEnv "FIELDLIVE_LIVE_ONLY").isSome
-  let mkCtx (fm : Bool) (am := false) (argOf : Std.HashMap Name Nat := {}) : Ctx :=
-    { env, candOfInd, candOfCtor, candOfRec, fieldMode := fm, paths := paths && (fm || am), argMode := am, argOf, isProj := isProject, deep }
-  let go : M Unit := do for r in rootsFound do reach r; run
+  let paths := cfg.paths
+  let mkCtx (fm : Bool) (am := false) (argOf : Std.HashMap Name Nat := {}) (pb := false) : Ctx :=
+    { env, candOfInd, candOfCtor, candOfRec, fieldMode := fm, paths := paths && (fm || am || pb), argMode := am, argOf, isProj := isProject, deep }
+  let go : M Unit := do for r in roots do reach r; run
   IO.FS.createDirAll outdir
   let writeLive (sf : St) : IO Unit := do
     let h ← IO.FS.Handle.mk (outdir ++ "/live-constants.txt") .write
@@ -453,32 +759,68 @@ unsafe def mainImpl (args : List String) : IO UInt32 := do
           t.putStrLn s!"{nm n}\t{d}\t{if p == .anonymous then "ROOT" else nm p}"
       t.flush
       IO.eprintln s!"path edges: {sf.edges.size}; tree nodes: {q.size - 1}"
-  if liveOnly then
-    let ((), sf) ← (go.run (mkCtx true)).run { vis := Std.HashSet.emptyWithCapacity (1 <<< 20), cands }
-    IO.eprintln s!"field-mode live constants: {sf.live.size} (visited {sf.nVis} nodes)"
+  if cfg.liveOnly then
+    let ((), sf) ← (go.run (mkCtx (cfg.mode == "fields"))).run { vis := Std.HashSet.emptyWithCapacity (1 <<< 20), cands }
+    IO.eprintln s!"live constants: {sf.live.size} (visited {sf.nVis} nodes)"
     writeLive sf
     return 0
   -- baseline
   let t0 ← IO.monoMsNow
-  let ((), sb) ← (go.run (mkCtx false)).run { vis := Std.HashSet.emptyWithCapacity (1 <<< 20), cands }
+  let ((), sb) ← (go.run (mkCtx false (pb := cfg.mode == "unreachable"))).run { vis := Std.HashSet.emptyWithCapacity (1 <<< 20), cands }
   IO.eprintln s!"baseline pass: {((← IO.monoMsNow) - t0) / 1000} s"
   let liveBase := sb.live
   IO.eprintln s!"baseline live constants: {liveBase.size} (visited {sb.nVis} nodes)"
-  -- FIELDLIVE_MODE=args: unused theorem arguments instead of dead fields (fields all count as read)
-  if (← IO.getEnv "FIELDLIVE_MODE") == some "args" then
-    let isStmt (n : Name) : Bool := match env.getModuleIdxFor? n with
-      | some i => [`Main, `Statements, `Challenge].contains (modNames[i.toNat]!).getRoot
-      | none => true
+  if let some f := cfg.liveOut? then
+    let h ← IO.FS.Handle.mk f .write
+    for n in liveBase do if isProject n then h.putStrLn (nm n)
+    h.flush
+  -- the constants an edit can have freed: live before it (--before), or live in the baseline now
+  let pool : Std.HashSet Name ← match cfg.before? with
+    | some f => do
+      let ls ← IO.FS.lines f
+      pure (ls.foldl (fun s l => if l.isEmpty then s else s.insert (String.toName l)) {})
+    | none => pure liveBase
+  let plan (live : Std.HashSet Name) (dropped : Std.HashSet Name) : IO Unit := do
+    if !cfg.plan then return
+    let (nDel, nKept) ← writePlan env modNames outdir isProject dropped live
+    IO.eprintln s!"prune plan: {nDel} declarations to delete; {nKept} kept because code that stays mentions them"
+  let droppedSet (live : Std.HashSet Name) : Std.HashSet Name :=
+    pool.fold (init := {}) fun s n => if !live.contains n && env.contains n && isProject n then s.insert n else s
+  -- every project constant: module, kind, whether its type ends in Prop, live in baseline / final pass
+  let writeInfo (live : Std.HashSet Name) : IO Unit := do
+    let ci ← IO.FS.Handle.mk (outdir ++ "/constants-info.tsv") .write
+    ci.putStrLn "constant\tmodule\tkind\tprop_valued\tlive_base\tlive_field"
+    let projConsts := env.constants.fold (init := #[]) fun acc n c =>
+      if n.isInternalDetail || !isProject n then acc else acc.push (n, c)
+    for (n, c) in projConsts do
+      let some i := env.getModuleIdxFor? n | continue
+      let kind := match c with
+        | .thmInfo _ => "thm" | .defnInfo _ => "def" | .opaqueInfo _ => "opaque" | .axiomInfo _ => "axiom"
+        | .inductInfo _ => "ind" | .ctorInfo _ => "ctor" | .recInfo _ => "rec" | .quotInfo _ => "quot"
+      ci.putStrLn s!"{nm n}\t{nm modNames[i.toNat]!}\t{kind}\t{if resultIsProp c.type then 1 else 0}\t{if liveBase.contains n then 1 else 0}\t{if live.contains n then 1 else 0}"
+    ci.flush
+  -- unreachable: project declarations outside the baseline closure
+  if cfg.mode == "unreachable" then
+    writeLive sb
+    writeInfo liveBase
+    let dropped : Std.HashSet Name := env.constants.fold (init := {}) fun s n _ =>
+      if isProject n && !liveBase.contains n then s.insert n else s
+    let nDropped ← writeDropped env outdir isProject (env.constants.fold (init := {}) fun s n _ => if isProject n then s.insert n else s) liveBase
+    IO.eprintln s!"unreachable project constants: {nDropped}"
+    plan liveBase dropped
+    IO.println s!"unreachable_constants\t{nDropped}"
+    return 0
+  -- args: unused theorem arguments instead of dead fields (fields all count as read)
+  if cfg.mode == "args" then
     let mut syn : Array (Name × Array (Nat × Name)) := #[]
     for n in liveBase do
-      if n.isInternalDetail || !isProject n || isStmt n then continue
+      if n.isInternalDetail || !isProject n || isProtected n then continue
       let some (.thmInfo t) := env.find? n | continue
       let ks := unusedArgs t.type t.value
       if !ks.isEmpty then syn := syn.push (n, ks)
     IO.eprintln s!"theorems with syntactically unused explicit arguments: {syn.size}"
     let mut pa ← propArgs env syn
-    -- FIELDLIVE_ONLY=file of "theorem<TAB>argument_index" lines: only those arguments may be dropped
-    let allow : Option (Std.HashSet String) ← match ← IO.getEnv "FIELDLIVE_ONLY" with
+    let allow : Option (Std.HashSet String) ← match cfg.only? with
       | some f => pure (some ((← IO.FS.lines f).foldl (fun s l => if l.isEmpty then s else s.insert l) {}))
       | none => pure none
     let mut acands : Array ACand := #[]
@@ -498,7 +840,7 @@ unsafe def mainImpl (args : List String) : IO UInt32 := do
     let live := sa.live
     IO.eprintln s!"arg-mode live constants: {live.size} (visited {sa.nVis} nodes)"
     writeLive sa
-    let dropped ← writeDropped env outdir isProject liveBase live
+    let dropped ← writeDropped env outdir isProject pool live
     let ua ← IO.FS.Handle.mk (outdir ++ "/unused-args.tsv") .write
     ua.putStrLn "theorem\targ_index\targ_name\ttype\tcall_sites_held\tfreed\tfreed_constants"
     let mut nUnused := 0
@@ -511,6 +853,8 @@ unsafe def mainImpl (args : List String) : IO UInt32 := do
         ua.putStrLn s!"{nm c.thm}\t{c.slots[s]!}\t{nm c.names[s]!}\t{tyOf.getD (c.thm, c.slots[s]!) ""}\t{c.pend[s]!.size}\t{got.size}\t{";".intercalate (got.toList.map nm)}"
     ua.flush
     IO.eprintln s!"unused arguments: {nUnused}; constants dropped: {dropped}"
+    -- before an edit the dropped constants are still mentioned at the call sites; plan after it
+    if cfg.before?.isSome then plan live (droppedSet live)
     IO.println s!"unused_args\t{nUnused}\ndropped_constants\t{dropped}"
     return 0
   let t1 ← IO.monoMsNow
@@ -518,34 +862,8 @@ unsafe def mainImpl (args : List String) : IO UInt32 := do
   IO.eprintln s!"field-mode pass: {((← IO.monoMsNow) - t1) / 1000} s"
   let live := sf.live
   IO.eprintln s!"field-mode live constants: {live.size} (visited {sf.nVis} nodes)"
-  -- FIELDLIVE_LIVE_OUT=file: write the baseline live project constants (a "before" snapshot).
-  -- FIELDLIVE_BEFORE=file: such a snapshot from before an edit. Then "dropped" means live in the
-  -- baseline before and not live (field mode) now: what the dead fields free plus what signature
-  -- changes free. The snapshot is the baseline set, not the field-mode set, so that the fields'
-  -- own share is not left out.
-  if let some f ← IO.getEnv "FIELDLIVE_LIVE_OUT" then
-    let h ← IO.FS.Handle.mk f .write
-    for n in liveBase do if isProject n then h.putStrLn (nm n)
-    h.flush
-  let pool : Std.HashSet Name ← match ← IO.getEnv "FIELDLIVE_BEFORE" with
-    | some f => do
-      let ls ← IO.FS.lines f
-      pure (ls.foldl (fun s l => if l.isEmpty then s else s.insert (String.toName l)) {})
-    | none => pure liveBase
-  -- outputs
   writeLive sf
-  -- every project constant: module, kind, whether its type ends in Prop, live in baseline / field mode
-  let ci ← IO.FS.Handle.mk (outdir ++ "/constants-info.tsv") .write
-  ci.putStrLn "constant\tmodule\tkind\tprop_valued\tlive_base\tlive_field"
-  let projConsts := env.constants.fold (init := #[]) fun acc n c =>
-    if n.isInternalDetail || !isProject n then acc else acc.push (n, c)
-  for (n, c) in projConsts do
-    let some i := env.getModuleIdxFor? n | continue
-    let kind := match c with
-      | .thmInfo _ => "thm" | .defnInfo _ => "def" | .opaqueInfo _ => "opaque" | .axiomInfo _ => "axiom"
-      | .inductInfo _ => "ind" | .ctorInfo _ => "ctor" | .recInfo _ => "rec" | .quotInfo _ => "quot"
-    ci.putStrLn s!"{nm n}\t{nm modNames[i.toNat]!}\t{kind}\t{if resultIsProp c.type then 1 else 0}\t{if liveBase.contains n then 1 else 0}\t{if live.contains n then 1 else 0}"
-  ci.flush
+  writeInfo live
   let mut deadFields := 0
   let mut deadStructs := 0
   let df ← IO.FS.Handle.mk (outdir ++ "/dead-fields.tsv") .write
@@ -570,6 +888,8 @@ unsafe def mainImpl (args : List String) : IO UInt32 := do
       let gotL := freedFrom env isProject liveBase live (c.pend[k]!.map (·.1))
       fa.putStrLn s!"{nm c.ind}\t{nm c.fieldNames[k]!}\t{gotL.size}\t{";".intercalate (gotL.toList.map nm)}"
   fa.flush
+  -- before the structural edits the dead fields' values still mention what they free; plan after
+  if cfg.before?.isSome then plan live (droppedSet live)
   IO.println s!"dead_fields\t{deadFields}\ndead_structs\t{deadStructs}\ndropped_constants\t{dropped}"
   return 0
 
