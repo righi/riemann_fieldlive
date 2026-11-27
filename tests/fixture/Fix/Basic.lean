@@ -44,6 +44,9 @@ private theorem private_unused : True := trivial
 
 instance instUnused : Inhabited (Fin 3) := ⟨0⟩
 
+/-- An unused local instance of a class written through a definition (`DecidableEq`): kept. -/
+local instance instDecEqUnit' : DecidableEq PUnit := fun _ _ => isTrue rfl
+
 /-- A notation is meta code: it is kept even though no proof term mentions it. -/
 scoped notation "⟪" n "⟫" => unusedDef n
 
@@ -52,6 +55,15 @@ scoped notation "⟪" n "⟫" => unusedDef n
 
 /-- Unreachable, but a coercion: coercions are unfolded where they are used, so it stays. -/
 instance instCoeBoolNat : Coe Bool Nat := ⟨fun b => if b then 1 else 0⟩
+
+/-- Used only by `Fix.Orphan`, which nothing imports. -/
+def orphanNeeds : Nat := 7
+
+/-- Unreachable, but mentioned by `onlyForSimp_def`, which the text check keeps. -/
+def onlyForSimp : Nat := 2
+
+/-- Proved by `rfl`; `Fix.Keep` writes its name, so it stays, and with it `onlyForSimp`. -/
+theorem onlyForSimp_def : onlyForSimp = 2 := rfl
 
 def twice (n : Nat) : Nat := n + n
 

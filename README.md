@@ -51,6 +51,8 @@ lake env /path/to/fieldlive/lean/.lake/build/bin/fieldlive [OPTIONS] OUTDIR
 | `--live-out FILE` | write the live project declarations: a snapshot to compare against after an edit |
 | `--before FILE` | such a snapshot: report what an edit freed (see below) |
 | `--no-plan` | do not write `prune-plan.tsv` |
+| `--no-import-all` | load only the `--import` modules. By default every module the project has built (`.lake/build/lib/lean`) is loaded too, since code outside the roots' imports still has to compile. |
+| `--prune-instances` | let the plan delete unused instances (see below) |
 | `--paths` | write `parents.tsv`, a shortest chain of references from a root to every live declaration |
 | `--deep` | also walk into library declarations (slower; the project results are the same) |
 | `--live-only` | skip the baseline pass; write only the live set |
@@ -65,8 +67,10 @@ Some declarations are used in ways kernel terms do not show, so they are kept as
 - `implemented_by` targets;
 - simp lemmas proved by `rfl` and definitions marked for simp to unfold, since `dsimp` uses them by
   unfolding;
-- coercion instances (`Coe`, `CoeFun`, `CoeSort`, …, scoped or not), since inserting a coercion
-  unfolds the instance away.
+- instances, global, scoped or local. Elaboration can unfold an instance away, so that a proof
+  found by it leaves no trace in the term (seen on the RH proof with a local `DecidableEq`
+  instance). `--prune-instances` lets the plan delete unused ones anyway, except coercions
+  (`Coe`, `CoeFun`, `CoeSort`, …), which coercion insertion always unfolds.
 
 Any other theorem proved by `rfl` can be used by `simp only [h]` or `dsimp only [h]` without a
 trace in the proof term. The plan marks such rows `text`, and `apply-plan.py` deletes them only if
@@ -90,7 +94,8 @@ last line, together with everything Lean generated from it (equation lemmas, `ma
 `_proof_` auxiliaries, `where` helpers, structure projections). A row is in the plan only when
 the declaration holds something unreachable and nothing reachable, and no declaration that stays
 mentions any part of it; the rows held back for that last reason, and what mentions them, are in
-`plan-kept.tsv`. Run `apply-plan.py` from the project root (or pass `--src`), so the text check
+`plan-kept.tsv`. If `apply-plan.py` keeps a row (a text-check hit, or a range sharing a line
+with other code), it keeps every row that row mentions too (the `needs` column). Run `apply-plan.py` from the project root (or pass `--src`), so the text check
 sees all the sources. It also removes the `open … in`-style lines that apply only to a
 deleted declaration, and skips (and reports) any range that shares a line with other code.
 
@@ -114,7 +119,8 @@ same way.
 
 | File | What it is |
 |---|---|
-| `prune-plan.tsv` | file, module, start line and column, end line and column, declarations, check (`exact`, or `text` for theorems proved by `rfl`): the ranges to delete |
+| `prune-plan.tsv` | id, file, module, start line and column, end line and column, declarations, check (`exact`, or `text` for theorems proved by `rfl`), needs (ids of the rows it mentions): the ranges to delete |
+| `unused-modules.txt` | (unreachable mode) project modules that declare something but nothing live: candidates for deleting the whole file |
 | `plan-kept.tsv` | declarations left out of the plan, and the declaration that stays and mentions them |
 | `dead-fields.tsv` | structure, field, is-Prop, field index, number of fields, construction sites held back |
 | `field-reach.tsv` | structure, field, count, then the declarations only that field keeps alive |

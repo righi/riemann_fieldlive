@@ -373,6 +373,10 @@ structure Config where
   liveOut? : Option String := none
   before? : Option String := none
   plan : Bool := true
+  /-- also load every module the project has built (`.lake/build/lib/lean`), not only `imports` -/
+  importAll : Bool := true
+  /-- let the plan delete instances (elaboration can unfold an instance away, leaving no trace) -/
+  pruneInstances : Bool := false
 
 def usage : String := "usage: fieldlive [OPTIONS] OUTDIR
 
@@ -397,6 +401,10 @@ LEAN_PATH points at the project's .olean files.
   --live-out FILE       write the baseline live project constants (a snapshot before an edit)
   --before FILE         such a snapshot: report what an edit freed (fields and args modes)
   --no-plan             do not write prune-plan.tsv
+  --no-import-all       load only the --import modules, not every module the project has built
+                        (code outside their imports is then not checked before deleting)
+  --prune-instances     let the plan delete unused instances (by default every instance is kept:
+                        elaboration can unfold an instance away, leaving no trace in the terms)
   --deep                also walk into library constants (slower, same project results)
   --paths               write parents.tsv, a shortest reference path to every live constant
   --live-only           skip the baseline; write only the live set (fields mode)
@@ -435,6 +443,8 @@ def parseArgs (args : List String) : IO (Except String Config) := do
             if !t.isEmpty then c := { c with roots := c.roots.push t.toName }
       else match a with
         | "--no-plan" => c := { c with plan := false }
+        | "--no-import-all" => c := { c with importAll := false }
+        | "--prune-instances" => c := { c with pruneInstances := true }
         | "--deep" => c := { c with deep := true }
         | "--paths" => c := { c with paths := true }
         | "--live-only" => c := { c with liveOnly := true }
@@ -564,6 +574,19 @@ def elabOnly (env : Environment) (isProj : Name → Bool) :
       if c.getPrefix.isAnonymous && c.toString.startsWith "Coe" then coes := coes.push n
   return (simpRfl ++ coes, simpRfl.size, coes.size, rfls)
 
+/-- whether a declaration's type is a class: an instance, global, scoped or local (local and scoped
+instances leave no global record, so this goes by the type) -/
+def isClassValued (env : Environment) (ci : ConstantInfo) : Bool := Id.run do
+  -- the head of the type after its binders; unfold definitions such as `DecidableEq` to a class
+  let mut e := ci.type
+  for _ in [0:8] do
+    let some c := e.getForallBody.getAppFn.constName? | return false
+    if isClass env c then return true
+    let some (.defnInfo d) := env.find? c | return false
+    e := d.value
+    while e.isLambda do e := e.bindingBody!
+  return false
+
 /-! ## Source ranges and the prune plan -/
 
 structure Range where
@@ -662,8 +685,12 @@ def writePlan (env : Environment) (modNames : Array Name) (outdir : String) (isP
           if !live.contains k then work := work.push k
   kept.flush
   let sp ← getSrcSearchPath
+  -- row ids, and for each row the other rows it mentions: if a row stays, so must those
+  let mut rowOf : Std.HashMap Nat Nat := {}
+  for u in [0:us.size] do
+    if del[u]! then rowOf := rowOf.insert u (rowOf.size + 1)
   let pl ← IO.FS.Handle.mk (outdir ++ "/prune-plan.tsv") .write
-  pl.putStrLn "file\tmodule\tstart_line\tstart_col\tend_line\tend_col\tdeclarations\tcheck"
+  pl.putStrLn "id\tfile\tmodule\tstart_line\tstart_col\tend_line\tend_col\tdeclarations\tcheck\tneeds"
   let mut nDel := 0
   for u in [0:us.size] do
     unless del[u]! do continue
@@ -677,7 +704,14 @@ def writePlan (env : Environment) (modNames : Array Name) (outdir : String) (isP
       | some m => some s!"private {nm m}"
       | none => if n.isInternalDetail then none else some (nm n)
     let check := if members[u]!.any textCheck.contains then "text" else "exact"
-    pl.putStrLn s!"{file}\t{nm r.mod}\t{r.sl}\t{r.sc}\t{r.el}\t{r.ec}\t{";".intercalate names.toList}\t{check}"
+    let mut needs : Std.HashSet Nat := {}
+    for k in members[u]! do
+      for m in usedBy env k do
+        if let some v := unitOf[m]? then
+          if v != u then
+            if let some i := rowOf[v]? then needs := needs.insert i
+    let needsS := ",".intercalate ((needs.toArray.qsort (· < ·)).toList.map toString)
+    pl.putStrLn s!"{rowOf[u]!}\t{file}\t{nm r.mod}\t{r.sl}\t{r.sc}\t{r.el}\t{r.ec}\t{";".intercalate names.toList}\t{check}\t{needsS}"
   pl.flush
   return (nDel, nKept)
 
@@ -694,8 +728,19 @@ unsafe def mainImpl (args : List String) : IO UInt32 := do
   initSearchPath (← findSysroot)
   -- loading the extensions (simp sets, instances) runs the imported modules' initializers
   enableInitializersExecution
+  -- every module the project has built: code outside the roots' imports still has to compile
+  let mut extra : Array Name := #[]
+  if cfg.importAll then
+    let dir : System.FilePath := ".lake/build/lib/lean"
+    if ← dir.isDir then
+      for f in ← dir.walkDir do
+        if f.extension == some "olean" then
+          let rel : String := ((f.withExtension "").toString.drop (dir.toString.length + 1)).toString
+          let m := (rel.splitOn "/").foldl (fun n c => n.str c) Name.anonymous
+          unless cfg.imports.contains m do extra := extra.push m
+    IO.eprintln s!"also importing the {extra.size} other modules the project has built"
   IO.eprintln s!"importing {cfg.imports.toList} ..."
-  let env ← importModules (cfg.imports.map fun m => { module := m }) {} (leakEnv := true) (loadExts := true)
+  let env ← importModules ((cfg.imports ++ extra).map fun m => { module := m }) {} (leakEnv := true) (loadExts := true)
   let modNames := env.allImportedModuleNames
   IO.eprintln s!"imported {modNames.size} modules"
   let projMods ← projectModules modNames cfg.projectRoots
@@ -713,16 +758,20 @@ unsafe def mainImpl (args : List String) : IO UInt32 := do
   let mut roots : Array Name := cfg.roots.filter env.contains
   IO.eprintln s!"roots named: {roots.size} of {cfg.roots.size} found"
   let mut nMeta := 0
+  let mut nInst := 0
   for (n, ci) in env.constants.toList do
     if !isProject n then continue
     if isProtected n && !n.isInternalDetail then roots := roots.push n
     else if isMetaLike env n ci then roots := roots.push n; nMeta := nMeta + 1
+    else if !cfg.pruneInstances && isClassValued env ci then roots := roots.push n; nInst := nInst + 1
     if let some t := Compiler.getImplementedBy? env n then roots := roots.push t
+    -- the entry point of an executable
+    if n == `main then roots := roots.push n
   let named := namedByMeta env isProject
   roots := roots ++ named
   let (eo, nSimp, nCoe, rflThms) ← elabOnly env isProject
   roots := roots ++ eo
-  IO.eprintln s!"roots: {roots.size} ({nMeta} meta declarations, {named.size} named by meta code, {nSimp} rfl simp lemmas or unfolded definitions, {nCoe} coercion instances)"
+  IO.eprintln s!"roots: {roots.size} ({nMeta} meta declarations, {named.size} named by meta code, {nSimp} rfl simp lemmas or unfolded definitions, {nCoe} coercion instances, {nInst} instances)"
   -- candidates
   let mut cands : Array Cand := #[]
   let mut candOfInd : Std.HashMap Name Nat := {}
@@ -855,6 +904,20 @@ unsafe def mainImpl (args : List String) : IO UInt32 := do
       if isProject n && !liveBase.contains n then s.insert n else s
     let nDropped ← writeDropped env outdir isProject (env.constants.fold (init := {}) fun s n _ => if isProject n then s.insert n else s) liveBase
     IO.eprintln s!"unreachable project constants: {nDropped}"
+    -- modules with no live declaration: candidates for deleting the whole file
+    let mut liveMods : Std.HashSet Name := {}
+    for n in liveBase do
+      if let some m := modOf n then liveMods := liveMods.insert m
+    -- only modules that declare something (not files of imports alone)
+    let declMods : Std.HashSet Name := env.constants.fold (init := {}) fun s n _ =>
+      if n.isInternalDetail then s else match modOf n with | some m => s.insert m | none => s
+    let um ← IO.FS.Handle.mk (outdir ++ "/unused-modules.txt") .write
+    let mut nUm := 0
+    for m in modNames do
+      if projMods.contains m && declMods.contains m && !liveMods.contains m && !underModule protect m then
+        um.putStrLn (nm m); nUm := nUm + 1
+    um.flush
+    IO.eprintln s!"project modules with no live declaration: {nUm} (unused-modules.txt)"
     plan liveBase dropped
     IO.println s!"unreachable_constants\t{nDropped}"
     return 0

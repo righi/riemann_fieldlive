@@ -17,7 +17,8 @@ Without --apply it only reports. For each range it also deletes:
   * the `open … in`, `variable … in`, `set_option … in`, `include … in` and `omit … in` lines
     directly above it, which apply only to that declaration;
   * one of the blank lines the deletion leaves next to each other.
-A range that shares a line with other code is skipped and reported, never cut mid-line.
+A range that shares a line with other code is skipped and reported, never cut mid-line. A row that
+is skipped keeps the rows it mentions (the plan's `needs` column), and so on.
 Build afterwards: the plan is exact about kernel references, but not about what elaboration does
 with names alone.
 """
@@ -99,31 +100,50 @@ def main():
     with open(a.plan, encoding='utf-8') as f:
         for r in csv.DictReader(f, delimiter='\t'):
             path = r['file'] or os.path.join(a.src, *r['module'].split('.')) + '.lean'
+            needs = [int(x) for x in (r.get('needs') or '').split(',') if x]
             rows[path].append((int(r['start_line']), int(r['start_col']), int(r['end_line']),
                                int(r['end_col']), r['module'], r['declarations'],
-                               r.get('check') or 'exact'))
+                               r.get('check') or 'exact', r.get('id') or f'{path}:{r["start_line"]}',
+                               needs))
     text_skip = text_check(rows, a.src)
+
+    # first, which rows cannot be deleted, and why
+    texts, why = {}, {}
+    for path, rs in rows.items():
+        if not os.path.exists(path):
+            for r in rs:
+                why[r[7]] = 'file not found'
+            continue
+        with open(path, encoding='utf-8') as f:
+            texts[path] = f.read().split('\n')
+        lines = texts[path]
+        for sl, sc, el, ec, mod, names, check, rid, needs in rs:
+            if (path, sl) in text_skip:
+                why[rid] = f'name written in {text_skip[(path, sl)]}'
+            # Lean lines are 1-based; columns count code points, as Python strings do
+            elif sl < 1 or el > len(lines):
+                why[rid] = 'range outside the file'
+            elif lines[sl - 1][:sc].strip() or lines[el - 1][ec:].strip():
+                why[rid] = 'shares a line with other code'
+    # a row that stays keeps every row it mentions
+    needs_of = {r[7]: r[8] for rs in rows.values() for r in rs}
+    work = list(why)
+    while work:
+        rid = work.pop()
+        for n in needs_of.get(rid, []):
+            n = str(n)
+            if n not in why:
+                why[n] = f'needed by row {rid}, which stays'
+                work.append(n)
 
     deleted, skipped, lines_removed = [], [], 0
     for path, rs in sorted(rows.items()):
-        if not os.path.exists(path):
-            skipped += [(path, r[0], 'file not found', r[5]) for r in rs]
-            continue
-        with open(path, encoding='utf-8') as f:
-            text = f.read()
-        lines = text.split('\n')
         cut = set()
-        for sl, sc, el, ec, mod, names, check in rs:
-            if (path, sl) in text_skip:
-                skipped.append((path, sl, f'name written in {text_skip[(path, sl)]}', names))
+        for sl, sc, el, ec, mod, names, check, rid, needs in rs:
+            if rid in why:
+                skipped.append((path, sl, why[rid], names))
                 continue
-            # Lean lines are 1-based; columns count code points, as Python strings do
-            if sl < 1 or el > len(lines):
-                skipped.append((path, sl, 'range outside the file', names))
-                continue
-            if lines[sl - 1][:sc].strip() or lines[el - 1][ec:].strip():
-                skipped.append((path, sl, 'shares a line with other code', names))
-                continue
+            lines = texts[path]
             span = set(range(sl - 1, el))
             k = sl - 2
             while k >= 0 and IN_PREFIX.match(lines[k]):
@@ -131,6 +151,9 @@ def main():
                 k -= 1
             cut |= span
             deleted.append((path, sl, mod, names))
+        if path not in texts or not cut:
+            continue
+        lines = texts[path]
         kept = [l for i, l in enumerate(lines) if i not in cut]
         # collapse the blank lines a deletion leaves behind
         out = []
@@ -147,10 +170,10 @@ def main():
         for path, sl, mod, names in deleted:
             f.write(f'{mod}\t{sl}\t{names}\n')
     verb = 'deleted' if a.apply else 'would delete'
-    print(f'{verb} {len(deleted)} declarations ({lines_removed} lines) in {len(rows)} files; '
+    print(f'{verb} {len(deleted)} declarations ({lines_removed} lines); {len(skipped)} kept; '
           f'list in {a.out}')
-    for path, sl, why, names in skipped:
-        print(f'skipped {path}:{sl} ({why}): {names}', file=sys.stderr)
+    for path, sl, w, names in skipped:
+        print(f'kept {path}:{sl} ({w}): {names}', file=sys.stderr)
     return 0
 
 

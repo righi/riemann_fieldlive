@@ -7,30 +7,37 @@ BIN="$HERE/../lean/.lake/build/bin/fieldlive"
 APPLY="$HERE/../apply-plan.py"
 FIX="$HERE/fixture"
 TMP="$(mktemp -d)"
-trap 'cp "$TMP/Basic.lean" "$FIX/Fix/Basic.lean" 2>/dev/null || true; rm -rf "$TMP"' EXIT
+trap 'rm -rf "$FIX/Fix" && cp -r "$TMP/Fix" "$FIX/Fix"; rm -rf "$TMP"' EXIT
 ulimit -s unlimited 2>/dev/null || true
 cd "$FIX"
-cp Fix/Basic.lean "$TMP/Basic.lean"
+cp -r Fix "$TMP/Fix"
 lake build -q
-fl() { lake env "$BIN" --import Fix --root fix_root --protect Fix.Keep "$@" 2>/dev/null; }
+fl() { lake env "$BIN" --import Fix --root fix_root --protect Fix.Keep --protect Fix.Orphan "$@" 2>/dev/null; }
 fail=0
 expect() {  # expect NAME EXPECTED ACTUAL
   if [ "$2" == "$3" ]; then echo "ok   $1"; else echo "FAIL $1"; echo "  expected: $2"; echo "  actual:   $3"; fail=1; fi
 }
-decls() { tail -n +2 "$1" | cut -f7 | tr ';' '\n' | grep -v "^$" | LC_ALL=C sort | tr '\n' ' '; }
+decls() { tail -n +2 "$1" | cut -f8 | tr ';' '\n' | grep -v "^$" | LC_ALL=C sort | tr '\n' ' '; }
 
 # 1. unreachable mode
 fl --mode unreachable "$TMP/u" >/dev/null
 expect "unreachable: plan" \
-  "$(printf "%s\n" Fix.instUnused Fix.twice_def Fix.unusedDef_spec Fix.unusedRec Fix.unusedRec.go Fix.unused_open Fix.uses_mentioned "private Fix.private_unused" | LC_ALL=C sort | tr "\n" " ")" \
+  "$(printf "%s\n" Fix.onlyForSimp Fix.onlyForSimp_def Fix.twice_def Fix.unusedDef_spec Fix.unusedRec Fix.unusedRec.go Fix.unused_open Fix.uses_mentioned "private Fix.private_unused" lonely | LC_ALL=C sort | tr "\n" " ")" \
   "$(decls "$TMP/u/prune-plan.tsv")"
+expect "unreachable: unused modules" "Fix.Unused" "$(cat "$TMP/u/unused-modules.txt")"
+fl --mode unreachable --no-import-all "$TMP/un" >/dev/null
+expect "unreachable: use in an unimported module seen only with import-all" "1 0" \
+  "$(cut -f8 "$TMP/un/prune-plan.tsv" | grep -c '^Fix.orphanNeeds$') $(cut -f8 "$TMP/u/prune-plan.tsv" | grep -c '^Fix.orphanNeeds$')"
+fl --mode unreachable --prune-instances "$TMP/ui" >/dev/null
+expect "unreachable --prune-instances: instance in plan" "1" "$(cut -f8 "$TMP/ui/prune-plan.tsv" | grep -c '^Fix.instUnused$')"
 python3 "$APPLY" "$TMP/u/prune-plan.tsv" --apply --out "$TMP/del.txt" >/dev/null 2>&1
+expect "unreachable: what a kept row needs is kept" "1" "$(grep -c '^def onlyForSimp' Fix/Basic.lean)"
 expect "unreachable: rfl theorem used by simp only kept" "1" "$(grep -c '^theorem twice_def' Fix/Basic.lean)"
 expect "unreachable: open … in prefix removed" "0" "$(grep -c '^open Nat in' Fix/Basic.lean || true)"
 expect "unreachable: notation and its target kept" "1" "$(grep -c '^scoped notation' Fix/Basic.lean)"
-expect "unreachable: rfl simp lemma and coercion kept" "2" "$(grep -cE '^(@\[simp\] theorem unusedDef_zero|instance instCoeBoolNat)' Fix/Basic.lean)"
+expect "unreachable: rfl simp lemma, coercion and DecidableEq instance kept" "3" "$(grep -cE '^(@\[simp\] theorem unusedDef_zero|instance instCoeBoolNat|local instance instDecEqUnit)' Fix/Basic.lean)"
 expect "unreachable: pruned tree builds" "0" "$(lake build -q >/dev/null 2>&1; echo $?)"
-cp "$TMP/Basic.lean" Fix/Basic.lean
+rm -rf Fix && cp -r "$TMP/Fix" Fix
 
 # 2. dead fields, then the edit, then --before
 fl --live-out "$TMP/before.txt" "$TMP/f1" >/dev/null
