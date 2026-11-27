@@ -1,5 +1,5 @@
 # compiled analyzer
-/fieldlive
+/rh/fieldlive
 *.o
 # export dump and other downloads
 *.zst

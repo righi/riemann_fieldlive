@@ -1,178 +1,126 @@
-# riemann_fieldlive: hypothesis fields the RH proof never reads
+# fieldlive: find and delete what a Lean project's main theorems do not need
 
-Reachability-based pruning keeps every declaration that a used constructor call mentions.
-But many of the proof's hypothesis bundles (structures) have fields that are proved and then
-never read by anything downstream. Each such field drags in its whole proof.
-`fieldlive` finds them at the kernel level, over the public `lean4export` dump.
+`fieldlive` loads a built Lean project, walks the kernel terms of everything its root theorems
+depend on, and reports what they do not need:
 
-**How it decides.** It walks the proof from the root theorems. For a candidate structure
-(a project inductive with one constructor, no indices, not recursive), the arguments of a
-fully applied constructor are *held back*, one per field, until something reads that field:
+- **unreachable declarations**: project declarations nothing reachable from the roots mentions;
+- **dead fields**: fields of the project's structures that are filled in but never read, so that
+  each one keeps alive whatever proves it;
+- **unused arguments**: explicit `Prop` arguments of theorems that their proofs never use.
 
-- a `proj` on that field;
-- the structure's recursor or `casesOn` (counts as reading every field);
-- a partially applied or bare constructor (counts as reading every field);
-- a later field's type that depends on the field.
+For each of them it can write a **prune plan**: the exact source ranges to delete, which
+`apply-plan.py` then deletes.
 
-Fields still held back at the end are dead. Constants reached only through dead fields drop
-out. A baseline run, with every field counted as read, gives the ordinary closure to compare against.
+It suits projects built towards a few target theorems (a formalised proof, a blueprint project).
+In a library, where every public declaration is the product, "not needed by the roots" means
+little; there only the unused-argument mode is of much use.
 
-## Files
+It was first written for the Riemann Hypothesis proof
+(leanprover-community/riemann-hypothesis); the notes, scripts and results from that work are in
+[`rh/`](rh/README.md).
+
+## Build
+
+The analyzer has to be built with the same Lean version as the project it analyses: set
+`lean/lean-toolchain` to the project's toolchain, then
+
+```bash
+cd lean && lake build          # builds lean/.lake/build/bin/fieldlive
+```
+
+## Run
+
+From the root of the built project (so `lake env` points Lean at its `.olean` files; a project
+whose cache you downloaded with `lake exe cache get` works without a local build):
+
+```bash
+ulimit -s unlimited
+lake env /path/to/fieldlive/lean/.lake/build/bin/fieldlive [OPTIONS] OUTDIR
+```
+
+| Option | Meaning |
+|---|---|
+| `--mode MODE` | `fields` (default), `args` or `unreachable` |
+| `--import MOD` | module to load (repeatable). Default: the root modules, or `Main`. |
+| `--root NAME` | a root declaration (repeatable) |
+| `--root-module MOD` | every declaration of `MOD` is a root (repeatable) |
+| `--roots-file FILE` | root declarations, one per line |
+| `--project MOD` | top-level module name of the project (repeatable). By default a module belongs to the project when its `.olean` is neither in the toolchain nor in a Lake dependency (`.lake/packages/`). |
+| `--protect MOD` | keep every declaration of `MOD` and of the modules under it, and never edit them; in `args` mode its theorems are not candidates (repeatable) |
+| `--only FILE` | only these fields (`Structure<TAB>field`) or arguments (`theorem<TAB>index`) may be dropped |
+| `--live-out FILE` | write the live project declarations: a snapshot to compare against after an edit |
+| `--before FILE` | such a snapshot: report what an edit freed (see below) |
+| `--no-plan` | do not write `prune-plan.tsv` |
+| `--paths` | write `parents.tsv`, a shortest chain of references from a root to every live declaration |
+| `--deep` | also walk into library declarations (slower; the project results are the same) |
+| `--live-only` | skip the baseline pass; write only the live set |
+
+Without `--root`, `--root-module` or `--roots-file`, the roots are the declarations of the
+`--import` modules. The root modules are always protected.
+
+Some declarations are used in ways kernel terms do not show, so they are treated as roots too:
+meta code (syntax, notations, macros, elaborators, unexpanders), declarations that meta code
+names by literal (the target of a `notation`, for example), and `implemented_by` targets.
+Delete only what the plan lists and build afterwards; anything the build then rejects is a case
+the analysis missed and should be reported.
+
+## Deleting unreachable declarations
+
+```bash
+lake env …/fieldlive --mode unreachable --import Main OUT
+python3 apply-plan.py OUT/prune-plan.tsv            # report only
+python3 apply-plan.py OUT/prune-plan.tsv --apply    # delete
+lake build
+```
+
+A plan row is a whole declaration as it is written in the source, from its doc comment to its
+last line, together with everything Lean generated from it (equation lemmas, `match_` and
+`_proof_` auxiliaries, `where` helpers, structure projections). A row is in the plan only when
+the declaration holds something unreachable and nothing reachable, and no declaration that stays
+mentions any part of it; the rows held back for that last reason, and what mentions them, are in
+`plan-kept.tsv`. `apply-plan.py` also removes the `open … in`-style lines that apply only to a
+deleted declaration, and skips (and reports) any range that shares a line with other code.
+
+## Removing dead fields and unused arguments
+
+A dead field's value is still written at every place the structure is built, so the code it
+frees cannot be deleted until the field itself is gone. The flow is:
+
+1. Find them: `lake env …/fieldlive --live-out before.txt OUT` writes `dead-fields.tsv` and
+   `field-reach.tsv` (what each field frees). Use `--only` to look at a chosen few.
+2. Remove the fields by hand: the field, its value at every construction site, and anything that
+   only passed it on. Build.
+3. `lake env …/fieldlive --before before.txt OUT2`: now `OUT2/prune-plan.tsv` lists what the edit
+   freed, checked against the edited tree. Apply it with `apply-plan.py` and build.
+
+Removing a field or an argument only weakens what is assumed, so the worst outcome is a build
+error, never an unsound proof. Unused arguments (`--mode args`, output `unused-args.tsv`) go the
+same way.
+
+## Outputs
 
 | File | What it is |
 |---|---|
-| `fieldlive.cpp` | The analyzer: one C++ file, standard library only. |
-| `project-inductives.txt` | The 5,569 inductive types defined in the project, one per line. It limits the analysis to project structures rather than Mathlib's. Derived from `decls.csv` in the rh-proof-dependencies v0.2.1 release. |
-| `run-fieldlive.sh` | One-step wrapper: downloads the export (resumable), checks its sha256, builds `fieldlive` and runs it. |
-| `prune.py` | Deletes the declarations a run found unreachable, after you have made the structural edits yourself (see below). |
-| `prune436.py` | The earlier version used for the first #431, with its two field edits hard-coded. Kept for the record. |
-| `by-structure.py` | Groups a run's dead fields by structure, with constants freed per structure and optional claim notes (`claims-151.tsv`). |
-| `claims-151.tsv` | Who has claimed which structure on rh#151 or in an open PR, as a snapshot (2026-11-25). |
-| `results/v4.33/` | Output of a full run on the Lean v4.33 export (see below). Later runs go in sibling folders. |
+| `prune-plan.tsv` | file, module, start line and column, end line and column, declarations: the ranges to delete |
+| `plan-kept.tsv` | declarations left out of the plan, and the declaration that stays and mentions them |
+| `dead-fields.tsv` | structure, field, is-Prop, field index, number of fields, construction sites held back |
+| `field-reach.tsv` | structure, field, count, then the declarations only that field keeps alive |
+| `unused-args.tsv` | theorem, argument index and name, type, call sites held back, declarations freed |
+| `dropped-constants.txt`, `dead-edges.csv` | the dropped kernel constants and the references among them (input for the older, text-based `prune.py`) |
+| `live-constants.txt`, `constants-info.tsv` | the live set; every project constant with its module, kind and liveness |
 
-## Build and run
-
-One step (downloads the 7.7 GB export into `./export` on first use, results go to `./out`):
+## Tests
 
 ```bash
-./run-fieldlive.sh [EXPORT_DIR] [OUT_DIR] [ROOT...]
+cd lean && lake build && cd .. && tests/run.sh
 ```
 
-Or by hand:
+runs both flows on the small project in `tests/fixture` and checks the plans and that the pruned
+tree still builds.
 
-```bash
-g++ -O2 -o fieldlive fieldlive.cpp
-curl -LO https://math.mit.edu/~drew/grh/solution.ndjson.zst
-# sha256 61a8938ad5f5e57397c1c0e3b954916af546d9004ade01c3555744a681b05381
-ulimit -s unlimited
-zstd -dc --long=30 solution.ndjson.zst | ./fieldlive project-inductives.txt OUT [ROOT...]
-```
+## Other tools
 
-The export is streamed, never unpacked to disk. The full run took 4 minutes and 10 GB RAM.
-Without ROOT arguments it starts from the five theorems in `Main`: `riemannHypothesis`,
-`riemannZeta_eq_zero_re`, `LFunction_ne_zero_of_half_lt_re`, `LFunction_eq_zero_re` and
-`LFunction_eq_zero_re_of_isPrimitive`.
-
-## Outputs (`results/v4.33/`)
-
-| File | Columns |
-|---|---|
-| `dead-fields.tsv` | structure, field, is-Prop, field index, number of fields, constructor sites held back. There are 2,656 dead fields in 898 structures. |
-| `dropped-constants.txt` | The 11,840 constants that stop being used when all dead fields go. |
-| `field-reach.tsv` | structure, field, count, then the `;`-separated dropped constants reachable from what that field holds back. |
-| `field-lines.tsv` | source lines freed, declarations freed, structure, field. Ranked; computed separately from the declaration line spans in `decls.csv`. |
-
-Top entries: `GlobalTheory.FunPr.ThetaLocalInputs.kudlaSplittingSplitUnitary` (13,489 lines),
-`GlobalTheory.CovTop.PublishedHodgeBundleTheorems.q8` (9,485 lines; it only becomes dead once
-other fields are removed), and `LiteratureCMHypothesis.st` (8,452 lines).
-
-**Caveat:** these numbers come from the Lean v4.33 export, before the v4.36 port (rh#66) and
-later trims, so on the current tree they will be smaller. Re-run on a fresh export of that tree.
-
-## Applying removals: `prune.py`
-
-For one PR:
-
-1. Run the Lean version (below) with `FIELDLIVE_ONLY` set to just the fields you are removing.
-2. Make the structural edits by hand: delete the fields, their assignments at every construction
-   site, and any signature that passed them on.
-3. Run `prune.py` on the edited tree:
-
-```bash
-python3 prune.py src OUT/dropped-constants.txt OUT/dead-edges.csv [--apply] [--out deleted.txt]
-```
-
-Without `--apply` it only reports. The list of deleted declarations goes to `--out`
-(default `prune-deleted.txt`), ready for the PR description.
-
-How it decides:
-
-1. Finds top-level declarations by tracking namespaces. A declaration is deleted only if its
-   exact kernel name is in the dropped set, and the name is defined in only one place.
-   Doc comments, attributes and command prefixes ending in ` in` (`variable … in`,
-   `open … in`, `set_option … in`) go with the declaration they introduce.
-2. Repeats until nothing changes. A declaration is kept if any surviving text in its file, or
-   in a file that imports it (directly or transitively; `import`, `public import`, `meta import`
-   and `import all` all count), mentions any dotted suffix of its name. Dropped constants that
-   can't be found by name (such as anonymous instances) are kept too, together with their
-   dropped dependencies.
-
-Code that is already unreachable from `Main` is still compiled, so always build the result.
-On current main this produced #431 (457 declarations) and #1783 (43 declarations), both merged.
-
-Earlier, with `prune436.py` on the rh#66 tree (Lean v4.36), the two largest fields free 1,631 declarations (about 22.5k lines
-in 411 files). The pruned tree builds with no errors (all 149,395 modules; 69,429 rebuilt), `Main.lean`
-and `Challenge.lean` are unchanged, and the five `Main` theorems depend only on `propext`,
-`Classical.choice` and `Quot.sound`. The same holds after rebasing onto upstream main at `fb085fff5bf`.
-Removing a field can only weaken an assumption, so the worst outcome is a compile error,
-never an unsound proof. Still, build the result and check axioms.
-
-## In-process version (`lean/`), no export needed
-
-`lean4export` on the v4.37 tree needs more than 90 GB and did not finish. `lean/Fieldlive.lean` is a port
-of `fieldlive.cpp` that runs on the built project directly: it imports `Main` (the `.olean` files are
-memory-mapped) and walks the kernel terms in place. Same rules, same output files.
-
-```bash
-cd lean && lake build                      # toolchain must match the project's
-cd /path/to/riemann-hypothesis             # built tree (or oleans from the CI cache)
-ulimit -s unlimited
-lake env /path/to/lean/.lake/build/bin/fieldlive OUTDIR /path/to/lean/project-roots.txt [ROOT...]
-```
-
-`project-roots.txt` lists the project's top-level module names; a structure is a candidate if it is
-defined under one of them (this replaces `project-inductives.txt`). On cc10d0dd2 it took 45 minutes
-and peaked at about 35 GB of working memory (RSS reads higher because it counts the mapped oleans).
-Small subterms (depth ≤ 4) are not memoised, so the `constructor_sites_held` column can count a site
-more than once; dead fields and dropped constants are unaffected.
-
-It also writes `dead-edges.csv` (`src,,dst`: kernel references between dropped constants), and,
-like `fieldlive.cpp`, honours `FIELDLIVE_ONLY=FILE` (lines `Structure<TAB>field`) so that only
-those fields may drop, which gives the exact removal set for one PR.
-
-The walk does not go into constants from Lean, Std, Batteries or Mathlib: libraries cannot import the
-project, so nothing in them can read a project field. The outputs list project constants only.
-On main a18a350c3e this gave the same results as the full walk (`FIELDLIVE_DEEP=1` restores it), and was
-about 6% faster. Each pass logs its time.
-
-**When an edit changes signatures,** not just fields (an argument or hypothesis is dropped), the code it frees
-is not visible as a dead field. Compare reachability before and after instead:
-
-```bash
-FIELDLIVE_LIVE_OUT=live-before.txt lake env …/fieldlive OUT-before roots.txt   # on the tree before the edit
-# make the edits, build
-FIELDLIVE_BEFORE=live-before.txt lake env …/fieldlive OUT-after roots.txt      # on the edited, built tree
-```
-
-The snapshot is the baseline set (every field counted as read), so the second run's
-`dropped-constants.txt` and `dead-edges.csv` list everything the change frees: what the removed fields
-held and what the signature changes cut off. They are ready for `prune.py` on their own. Use the same
-`FIELDLIVE_ONLY` in both runs if you set one. #3624 (`GeoLaws` and `GeoTie.ThetaTie`) was made this way,
-with an earlier version that snapshotted the field-mode set; there the first run's dropped list was
-added to the second's to get the same result.
-
-No local build is needed: clone the project, run `lake exe cache get` (about 20 minutes, 82 GB),
-then run the command above in that tree.
-
-Results: `results/v4.37-cc10d0d/` (#431's old head) and `results/v4.37-94779230/` (main on
-2026-11-24, from the CI cache: 2,670 dead fields in 896 structures, 5,942 constants dropped).
-On cc10d0dd2 it reports every field removed for being unread in the merged #151 PRs (#458, #459,
-#474, #478, #489's `DivT.loc`, #490), and the same 28 dead `DivX` fields as the v4.33 run.
-`results/v4.37-fcb6eac753/` is main on 2026-11-25 (after batch 12): 2,449 dead fields in 862 structures,
-4,063 constants dropped. It adds `by-structure.tsv` (`python3 by-structure.py OUT claims-151.tsv`).
-
-### Other options (environment variables)
-
-- `FIELDLIVE_PATHS=1`: also write `parents.tsv` (`constant, depth, parent`), a shortest-path tree of
-  references from the roots in the field-mode walk, so you can see why a constant is still live.
-  The run also writes `live-constants.txt` and `constants-info.tsv` (every project constant with its
-  module, kind, whether its type ends in `Prop`, and whether it is live in the baseline and in field mode).
-- `FIELDLIVE_LIVE_ONLY=1`: skip the baseline; write only the field-mode live set (and the tree).
-- `FIELDLIVE_MODULE=M`: import `M` instead of `Main` (for testing on a small module).
-- `FIELDLIVE_MODE=args` (experimental): unused theorem arguments instead of dead fields. Candidates are
-  explicit, Prop-typed arguments of reachable project theorems (not in `Main`, `Statements` or
-  `Challenge`) whose variable occurs neither in the proof nor in a later binder type nor the statement.
-  The walk holds back such an argument at every full call; a bare or partial use of the theorem counts
-  as using all its arguments. Fields all count as read. Writes `unused-args.tsv` (theorem, argument
-  index and name, type, call sites held, constants freed and their list) plus `dropped-constants.txt`
-  and `dead-edges.csv` for `prune.py`. `FIELDLIVE_ONLY` then takes `theorem<TAB>argument_index` lines.
+`prune.py` is the earlier, text-based version of `apply-plan.py`: it takes
+`dropped-constants.txt` and guesses declarations from the source text. `by-structure.py` groups
+a run's dead fields by structure. For unused imports use Mathlib's `shake`; for unused arguments
+of library declarations, Batteries' `#lint`.

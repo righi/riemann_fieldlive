@@ -1,11 +1,15 @@
 /-
-fieldlive (in-process port of fieldlive.cpp): field-level liveness over the loaded environment,
-instead of over a lean4export dump. Same algorithm; see fieldlive.cpp for the rules.
+fieldlive: what a built Lean project's root theorems do not need, over the loaded environment.
 
-Usage (from the project root, so LEAN_PATH points at its oleans):
-  lake env fieldlive OUTDIR PROJECT_ROOTS_FILE [ROOT...]
-PROJECT_ROOTS_FILE lists top-level module names (e.g. `Development`), one per line; a structure is a
-candidate only if it is defined in a module under one of them.
+Walks the kernel terms reachable from the roots. In `fields` mode the arguments of a fully applied
+constructor of a project structure are held back, one per field, until something reads that field
+(a projection, the recursor or `casesOn`, a partial or bare use of the constructor, or a later
+field's type); fields still held back at the end are dead. `args` mode does the same for unused
+explicit `Prop` arguments of theorems, `unreachable` mode only computes the closure. A baseline
+pass, with every field read, gives the ordinary closure to compare against. The prune plan maps
+what is dropped back to source ranges.
+
+Run `fieldlive --help` for the options, from the project root with `lake env`.
 -/
 import Lean
 open Lean
