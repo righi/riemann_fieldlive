@@ -50,6 +50,7 @@ lake env /path/to/fieldlive/lean/.lake/build/bin/fieldlive [OPTIONS] OUTDIR
 | `--only FILE` | only these fields (`Structure<TAB>field`) or arguments (`theorem<TAB>index`) may be dropped |
 | `--live-out FILE` | write the live project declarations: a snapshot to compare against after an edit |
 | `--before FILE` | such a snapshot: report what an edit freed (see below) |
+| `--roots-out FILE` | write each root theorem (the `--root` names and the declarations of the root modules) with a hash of its statement and the axioms it depends on |
 | `--no-plan` | do not write `prune-plan.tsv` |
 | `--no-import-all` | load only the `--import` modules. By default every module the project has built (`.lake/build/lib/lean`) is loaded too, since code outside the roots' imports still has to compile. |
 | `--prune-instances` | let the plan delete unused instances (see below) |
@@ -98,6 +99,19 @@ mentions any part of it; the rows held back for that last reason, and what menti
 with other code), it keeps every row that row mentions too (the `needs` column). Run `apply-plan.py` from the project root (or pass `--src`), so the text check
 sees all the sources. It also removes the `open … in`-style lines that apply only to a
 deleted declaration, and skips (and reports) any range that shares a line with other code.
+
+### In rounds, checked: `clean.py`
+
+```bash
+python3 clean.py --fieldlive …/fieldlive [--build CMD] [--wrap CMD] [--commit] -- --import Main --protect Statements
+```
+
+builds the project, then repeats: analyse, check the root theorems, delete the plan, build. It
+stops when a round deletes nothing. Before each deletion it compares the roots (`--roots-out`)
+with round 0: same statements, same axioms. If a build fails or a root changed, it undoes that
+round's edits, says why, and stops with status 1. `--commit` commits each round that builds, and
+`--wrap` prefixes the analysis and the build (to cap their memory, for example). Options after
+`--` go to fieldlive.
 
 ## Removing dead fields and unused arguments
 

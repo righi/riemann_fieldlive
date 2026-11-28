@@ -48,4 +48,19 @@ fl --before "$TMP/before.txt" "$TMP/f2" >/dev/null
 expect "fields --before: plan" "Fix.helper_for_big " "$(decls "$TMP/f2/prune-plan.tsv")"
 python3 "$APPLY" "$TMP/f2/prune-plan.tsv" --apply --out "$TMP/del.txt" >/dev/null 2>&1
 expect "fields --before: pruned tree builds" "0" "$(lake build -q >/dev/null 2>&1; echo $?)"
+rm -rf Fix && cp -r "$TMP/Fix" Fix
+
+# 3. clean.py: rounds of delete and build until nothing is left, roots checked each round
+lake build -q
+python3 "$HERE/../clean.py" --fieldlive "$BIN" --work "$TMP/c" -- --import Fix --root fix_root \
+  --protect Fix.Keep --protect Fix.Orphan >"$TMP/clean.log" 2>&1 && rc=0 || rc=$?
+expect "clean: finishes" "0 1" "$rc $(grep -c '^done: nothing more to delete after 1 rounds; 6 declarations' "$TMP/clean.log")"
+expect "clean: tree builds" "0" "$(lake build -q >/dev/null 2>&1; echo $?)"
+rm -rf Fix && cp -r "$TMP/Fix" Fix
+# --roots-out sees a changed statement and changed axioms
+sed -i 's/^theorem fix_root : 0 < (5 : Nat) ∧ Fix.twice 2 = 4 := ⟨Fix.five_pos, by simp only \[Fix.twice_def\]⟩$/theorem fix_root : 0 < (5 : Nat) ∧ Fix.twice 2 = 4 ∧ (True ∨ ¬True) := ⟨Fix.five_pos, by simp only [Fix.twice_def], Classical.em True⟩/' Fix/Main.lean
+lake build -q
+fl --mode unreachable --no-plan --roots-out "$TMP/roots2.tsv" "$TMP/r2" >/dev/null
+expect "roots-out: statement and axioms" "different Classical.choice,Quot.sound,propext" \
+  "$([ "$(cut -f2 "$TMP/c/round0/roots.tsv")" != "$(cut -f2 "$TMP/roots2.tsv")" ] && echo different) $(cut -f3 "$TMP/roots2.tsv")"
 exit $fail

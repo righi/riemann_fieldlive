@@ -371,6 +371,8 @@ structure Config where
   paths : Bool := false
   liveOnly : Bool := false
   liveOut? : Option String := none
+  /-- write each target root's type hash and axioms, to check an edit changed neither -/
+  rootsOut? : Option String := none
   before? : Option String := none
   plan : Bool := true
   /-- also load every module the project has built (`.lake/build/lib/lean`), not only `imports` -/
@@ -400,6 +402,9 @@ LEAN_PATH points at the project's .olean files.
                         may be dropped
   --live-out FILE       write the baseline live project constants (a snapshot before an edit)
   --before FILE         such a snapshot: report what an edit freed (fields and args modes)
+  --roots-out FILE      write each root theorem (the --root names and the declarations of the
+                        root modules) with a hash of its statement and the axioms it uses, to
+                        compare before and after an edit
   --no-plan             do not write prune-plan.tsv
   --no-import-all       load only the --import modules, not every module the project has built
                         (code outside their imports is then not checked before deleting)
@@ -418,7 +423,7 @@ def parseArgs (args : List String) : IO (Except String Config) := do
   let mut pos : Array String := #[]
   let mut rest := args
   let valued := ["--mode", "--import", "--root", "--root-module", "--project", "--protect", "--only",
-    "--live-out", "--before", "--roots-file"]
+    "--live-out", "--before", "--roots-file", "--roots-out"]
   repeat
     match rest with
     | [] => break
@@ -437,6 +442,7 @@ def parseArgs (args : List String) : IO (Except String Config) := do
         | "--only" => c := { c with only? := some v }
         | "--live-out" => c := { c with liveOut? := some v }
         | "--before" => c := { c with before? := some v }
+        | "--roots-out" => c := { c with rootsOut? := some v }
         | _ =>
           for l in ← IO.FS.lines v do
             let t := l.trimAscii.toString
@@ -717,6 +723,22 @@ def writePlan (env : Environment) (modNames : Array Name) (outdir : String) (isP
 
 /-! ## Main -/
 
+/-- the target roots, one per line: name, a hash of the statement, the axioms used (sorted). An edit
+that keeps this file the same changed neither what is proved nor what it rests on. A named root
+that is gone is written `MISSING`. -/
+def writeRoots (env : Environment) (f : String) (named extra : Array Name) : IO Unit := do
+  let ns := (named ++ extra).foldl (fun (a : Array Name) n => if a.contains n then a else a.push n) #[]
+  let ns := ns.qsort (fun a b => Name.lt a b)
+  let act : CoreM (Array String) := ns.mapM fun n => do
+    match env.find? n with
+    | none => return s!"{nm n}\tMISSING\t"
+    | some ci =>
+      let ax := (← collectAxioms n).map nm |>.qsort (· < ·)
+      return s!"{nm n}\t{ci.type.hash}\t{",".intercalate ax.toList}"
+  let (ls, _) ← act.toIO { fileName := "<fieldlive>", fileMap := default, maxHeartbeats := 0 } { env }
+  IO.FS.writeFile f (String.join (ls.toList.map (· ++ "\n")))
+  IO.eprintln s!"roots written to {f}: {ns.size}"
+
 unsafe def mainImpl (args : List String) : IO UInt32 := do
   let cfg ← match ← parseArgs args with
     | .ok c => pure c
@@ -757,6 +779,9 @@ unsafe def mainImpl (args : List String) : IO UInt32 := do
   -- roots: the named declarations, every declaration of a root or protected module, and meta code
   let mut roots : Array Name := cfg.roots.filter env.contains
   IO.eprintln s!"roots named: {roots.size} of {cfg.roots.size} found"
+  if let some f := cfg.rootsOut? then
+    writeRoots env f cfg.roots (env.constants.fold (init := #[]) fun acc n _ =>
+      if !n.isInternalDetail && (modOf n).any (rootMods.contains ·) then acc.push n else acc)
   let mut nMeta := 0
   let mut nInst := 0
   for (n, ci) in env.constants.toList do
