@@ -12,7 +12,7 @@ ulimit -s unlimited 2>/dev/null || true
 cd "$FIX"
 cp -r Fix "$TMP/Fix"
 lake build -q
-fl() { lake env "$BIN" --import Fix --root fix_root --protect Fix.Keep --protect Fix.Orphan "$@" 2>/dev/null; }
+fl() { lake env "$BIN" --import Fix --root fix_root --root Fix.boxSum --protect Fix.Keep --protect Fix.Orphan "$@" 2>/dev/null; }
 fail=0
 expect() {  # expect NAME EXPECTED ACTUAL
   if [ "$2" == "$3" ]; then echo "ok   $1"; else echo "FAIL $1"; echo "  expected: $2"; echo "  actual:   $3"; fail=1; fi
@@ -40,11 +40,13 @@ expect "unreachable: pruned tree builds" "0" "$(lake build -q >/dev/null 2>&1; e
 rm -rf Fix && cp -r "$TMP/Fix" Fix
 
 # 2. dead fields, then the edit, then --before
-fl --live-out "$TMP/before.txt" "$TMP/f1" >/dev/null
-expect "fields: dead field" "Fix.Facts big" "$(tail -n +2 "$TMP/f1/dead-fields.tsv" | cut -f1,2 | tr '\t' ' ')"
+fl --live-out "$TMP/before.txt" "$TMP/f0" >/dev/null
+expect "fields: dead fields" "Fix.Box junk,Fix.Facts big,Fix.Pair extra," "$(tail -n +2 "$TMP/f0/dead-fields.tsv" | cut -f1,2 | LC_ALL=C sort | tr '\t\n' ' ,')"
+printf 'Fix.Facts\tbig\n' > "$TMP/only.txt"
+fl --only "$TMP/only.txt" --live-out "$TMP/before.txt" "$TMP/f1" >/dev/null
 sed -i '/^  big : n ≠ 1000$/d; s/⟨by decide, helper_for_big⟩/⟨by decide⟩/' Fix/Basic.lean
 lake build -q
-fl --before "$TMP/before.txt" "$TMP/f2" >/dev/null
+fl --only "$TMP/only.txt" --before "$TMP/before.txt" "$TMP/f2" >/dev/null
 expect "fields --before: plan" "Fix.helper_for_big " "$(decls "$TMP/f2/prune-plan.tsv")"
 python3 "$APPLY" "$TMP/f2/prune-plan.tsv" --apply --out "$TMP/del.txt" >/dev/null 2>&1
 expect "fields --before: pruned tree builds" "0" "$(lake build -q >/dev/null 2>&1; echo $?)"
@@ -52,15 +54,26 @@ rm -rf Fix && cp -r "$TMP/Fix" Fix
 
 # 3. clean.py: rounds of delete and build until nothing is left, roots checked each round
 lake build -q
-python3 "$HERE/../clean.py" --fieldlive "$BIN" --work "$TMP/c" -- --import Fix --root fix_root \
+python3 "$HERE/../clean.py" --fieldlive "$BIN" --work "$TMP/c" -- --import Fix --root fix_root --root Fix.boxSum \
   --protect Fix.Keep --protect Fix.Orphan >"$TMP/clean.log" 2>&1 && rc=0 || rc=$?
-expect "clean: finishes" "0 1" "$rc $(grep -c '^done: nothing more to delete after 1 rounds; 6 declarations' "$TMP/clean.log")"
+expect "clean: finishes" "0 1" "$rc $(grep -c '^done: 6 declarations deleted, 0 fields removed' "$TMP/clean.log")"
 expect "clean: tree builds" "0" "$(lake build -q >/dev/null 2>&1; echo $?)"
+rm -rf Fix && cp -r "$TMP/Fix" Fix
+
+# 4. clean.py --fields: dead fields removed at every kind of construction site, blocked ones kept
+lake build -q
+python3 "$HERE/../clean.py" --fieldlive "$BIN" --fields --work "$TMP/cf" -- --import Fix --root fix_root \
+  --root Fix.boxSum --protect Fix.Keep --protect Fix.Orphan >"$TMP/cleanf.log" 2>&1 && rc=0 || rc=$?
+expect "clean --fields: finishes" "0 1" "$rc $(grep -c '^done: 8 declarations deleted, 2 fields removed' "$TMP/cleanf.log")"
+expect "clean --fields: sites edited" "0 0 1 1 1 1" "$(grep -c 'junk :\|junkValue' Fix/Fields.lean) $(grep -c 'big' Fix/Basic.lean) \
+$(grep -c '⟨1, 2⟩' Fix/Fields.lean) $(grep -c '{ a := 3, b := 4 }' Fix/Fields.lean) $(grep -c 'Box.mk 7 8' Fix/Fields.lean) $(grep -c '^  extra : Nat' Fix/Fields.lean)"
+expect "clean --fields: blocked field reported" "Fix.Pair.extra" "$(cut -f1 "$TMP"/cf/*-fields/blocked-fields.tsv | sort -u | head -1)"
+expect "clean --fields: tree builds" "0" "$(lake build -q >/dev/null 2>&1; echo $?)"
 rm -rf Fix && cp -r "$TMP/Fix" Fix
 # --roots-out sees a changed statement and changed axioms
 sed -i 's/^theorem fix_root : 0 < (5 : Nat) ∧ Fix.twice 2 = 4 := ⟨Fix.five_pos, by simp only \[Fix.twice_def\]⟩$/theorem fix_root : 0 < (5 : Nat) ∧ Fix.twice 2 = 4 ∧ (True ∨ ¬True) := ⟨Fix.five_pos, by simp only [Fix.twice_def], Classical.em True⟩/' Fix/Main.lean
 lake build -q
 fl --mode unreachable --no-plan --roots-out "$TMP/roots2.tsv" "$TMP/r2" >/dev/null
 expect "roots-out: statement and axioms" "different Classical.choice,Quot.sound,propext" \
-  "$([ "$(cut -f2 "$TMP/c/round0/roots.tsv")" != "$(cut -f2 "$TMP/roots2.tsv")" ] && echo different) $(cut -f3 "$TMP/roots2.tsv")"
+  "$([ -s "$TMP/c/01-unreachable/roots.tsv" ] && [ "$(cut -f2 "$TMP/c/01-unreachable/roots.tsv")" != "$(cut -f2 "$TMP/roots2.tsv")" ] && echo different) $(cut -f3 "$TMP/roots2.tsv")"
 exit $fail

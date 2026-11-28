@@ -11,3 +11,4 @@
 prune-deleted.txt
 # lake build output
 .lake/
+__pycache__/

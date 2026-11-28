@@ -88,24 +88,24 @@ def text_check(rows, src):
             return skip
 
 
-def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('plan')
-    ap.add_argument('--src', default='.')
-    ap.add_argument('--apply', action='store_true')
-    ap.add_argument('--out', default='prune-deleted.txt')
-    a = ap.parse_args()
-
+def read_plan(plan, src):
     rows = collections.defaultdict(list)
-    with open(a.plan, encoding='utf-8') as f:
+    with open(plan, encoding='utf-8') as f:
         for r in csv.DictReader(f, delimiter='\t'):
-            path = r['file'] or os.path.join(a.src, *r['module'].split('.')) + '.lean'
+            path = r['file'] or os.path.join(src, *r['module'].split('.')) + '.lean'
             needs = [int(x) for x in (r.get('needs') or '').split(',') if x]
             rows[path].append((int(r['start_line']), int(r['start_col']), int(r['end_line']),
                                int(r['end_col']), r['module'], r['declarations'],
                                r.get('check') or 'exact', r.get('id') or f'{path}:{r["start_line"]}',
                                needs))
-    text_skip = text_check(rows, a.src)
+    return rows
+
+
+def plan_cuts(plan, src):
+    """what to delete: (texts {path: lines}, cut {path: set of 0-based line indices},
+    deleted [(path, line, module, names)], skipped [(path, line, why, names)])"""
+    rows = read_plan(plan, src)
+    text_skip = text_check(rows, src)
 
     # first, which rows cannot be deleted, and why
     texts, why = {}, {}
@@ -136,7 +136,7 @@ def main():
                 why[n] = f'needed by row {rid}, which stays'
                 work.append(n)
 
-    deleted, skipped, lines_removed = [], [], 0
+    deleted, skipped, cuts = [], [], {}
     for path, rs in sorted(rows.items()):
         cut = set()
         for sl, sc, el, ec, mod, names, check, rid, needs in rs:
@@ -151,16 +151,34 @@ def main():
                 k -= 1
             cut |= span
             deleted.append((path, sl, mod, names))
-        if path not in texts or not cut:
+        if cut:
+            cuts[path] = cut
+    return texts, cuts, deleted, skipped
+
+
+def collapse_blank(lines):
+    """drop one of two blank lines next to each other"""
+    out = []
+    for l in lines:
+        if not l.strip() and out and not out[-1].strip():
             continue
+        out.append(l)
+    return out
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('plan')
+    ap.add_argument('--src', default='.')
+    ap.add_argument('--apply', action='store_true')
+    ap.add_argument('--out', default='prune-deleted.txt')
+    a = ap.parse_args()
+
+    texts, cuts, deleted, skipped = plan_cuts(a.plan, a.src)
+    lines_removed = 0
+    for path, cut in cuts.items():
         lines = texts[path]
-        kept = [l for i, l in enumerate(lines) if i not in cut]
-        # collapse the blank lines a deletion leaves behind
-        out = []
-        for l in kept:
-            if not l.strip() and out and not out[-1].strip():
-                continue
-            out.append(l)
+        out = collapse_blank([l for i, l in enumerate(lines) if i not in cut])
         lines_removed += len(lines) - len(out)
         if a.apply:
             with open(path, 'w', encoding='utf-8') as f:

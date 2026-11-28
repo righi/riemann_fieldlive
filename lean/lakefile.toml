@@ -5,3 +5,8 @@ defaultTargets = ["fieldlive"]
 name = "fieldlive"
 root = "Fieldlive"
 supportInterpreter = true
+
+[[lean_exe]]
+name = "fieldedit"
+root = "FieldEdit"
+supportInterpreter = true

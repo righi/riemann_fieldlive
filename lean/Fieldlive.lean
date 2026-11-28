@@ -659,7 +659,7 @@ def usedBy (env : Environment) (n : Name) : NameSet := Id.run do
 constant and nothing live; then, until nothing changes, a deleted unit comes back when a constant
 that stays (outside every deleted unit) mentions one of its constants. Returns (deleted, kept). -/
 def writePlan (env : Environment) (modNames : Array Name) (outdir : String) (isProj : Name → Bool)
-    (dropped live : Std.HashSet Name) (textCheck : NameSet) : IO (Nat × Nat) := do
+    (dropped live : Std.HashSet Name) (textCheck : NameSet) (base := "prune-plan") : IO (Nat × Nat) := do
   let consts := env.constants.fold (init := #[]) fun acc n _ => if isProj n then acc.push n else acc
   let (unitOf, us) := units env modNames consts
   let mut members : Array (Array Name) := Array.replicate us.size #[]
@@ -675,7 +675,7 @@ def writePlan (env : Environment) (modNames : Array Name) (outdir : String) (isP
     match unitOf[n]? with
     | some u => if !del[u]! then work := work.push n
     | none => work := work.push n
-  let kept ← IO.FS.Handle.mk (outdir ++ "/plan-kept.tsv") .write
+  let kept ← IO.FS.Handle.mk (outdir ++ (if base == "prune-plan" then "/plan-kept.tsv" else s!"/{base}-kept.tsv")) .write
   kept.putStrLn "constant\tmentioned_by"
   let mut nKept := 0
   while h : work.size > 0 do
@@ -695,7 +695,7 @@ def writePlan (env : Environment) (modNames : Array Name) (outdir : String) (isP
   let mut rowOf : Std.HashMap Nat Nat := {}
   for u in [0:us.size] do
     if del[u]! then rowOf := rowOf.insert u (rowOf.size + 1)
-  let pl ← IO.FS.Handle.mk (outdir ++ "/prune-plan.tsv") .write
+  let pl ← IO.FS.Handle.mk (outdir ++ s!"/{base}.tsv") .write
   pl.putStrLn "id\tfile\tmodule\tstart_line\tstart_col\tend_line\tend_col\tdeclarations\tcheck\tneeds"
   let mut nDel := 0
   for u in [0:us.size] do
@@ -788,7 +788,8 @@ unsafe def mainImpl (args : List String) : IO UInt32 := do
     if !isProject n then continue
     if isProtected n && !n.isInternalDetail then roots := roots.push n
     else if isMetaLike env n ci then roots := roots.push n; nMeta := nMeta + 1
-    else if !cfg.pruneInstances && isClassValued env ci then roots := roots.push n; nInst := nInst + 1
+    -- not generated instances (`_sizeOf_inst` reads every field; it is made again from the structure)
+    else if !cfg.pruneInstances && !n.isInternal && isClassValued env ci then roots := roots.push n; nInst := nInst + 1
     if let some t := Compiler.getImplementedBy? env n then roots := roots.push t
     -- the entry point of an executable
     if n == `main then roots := roots.push n
@@ -1026,6 +1027,40 @@ unsafe def mainImpl (args : List String) : IO UInt32 := do
   fa.flush
   -- before the structural edits the dead fields' values still mention what they free; plan after
   if cfg.before?.isSome then plan live (droppedSet live)
+  else if cfg.plan then
+    -- or plan now, for applying together with the edits that remove the fields (fieldedit)
+    let (nDel, _) ← writePlan env modNames outdir isProject (droppedSet live) live rflThms "field-plan"
+    IO.eprintln s!"field plan: {nDel} declarations to delete once the dead fields are gone (field-plan.tsv)"
+    -- the files that build or read each dead field: the structure's own, and those of every project
+    -- declaration that mentions its constructor or its projection
+    let mut want : Std.HashMap Name (Array Nat) := {}
+    let mut targets : Array (Name × Cand × Nat) := #[]
+    for c in sf.cands do
+      if !live.contains c.ind then continue
+      for k in [0:c.nFields] do
+        if c.read[k]! then continue
+        let t := targets.size
+        targets := targets.push (c.ind ++ c.fieldNames[k]!, c, k)
+        want := want.alter c.ctor (fun v => some ((v.getD #[]).push t))
+        want := want.alter (c.ind ++ c.fieldNames[k]!) (fun v => some ((v.getD #[]).push t))
+    let mut mods : Array (Std.HashSet Name) := targets.map fun (_, c, _) =>
+      match modOf c.ind with | some m => ({} : Std.HashSet Name).insert m | none => {}
+    if !targets.isEmpty then
+      for (n, ci) in env.constants.toList do
+        if !isProject n then continue
+        let some m := modOf n | continue
+        for u in ci.getUsedConstantsAsSet do
+          if let some ts := want[u]? then
+            for t in ts do mods := mods.modify t (·.insert m)
+    let sp ← getSrcSearchPath
+    let fs ← IO.FS.Handle.mk (outdir ++ "/field-sites.tsv") .write
+    fs.putStrLn "projection\tstructure\tfield\tfield_index\tnum_fields\tconstructor\tmodule\tfile"
+    for t in [0:targets.size] do
+      let (proj, c, k) := targets[t]!
+      for m in (mods[t]!.toArray.qsort Name.lt) do
+        let file := match ← sp.findModuleWithExt "lean" m with | some f => f.toString | none => ""
+        fs.putStrLn s!"{nm proj}\t{nm c.ind}\t{nm c.fieldNames[k]!}\t{k}\t{c.nFields}\t{nm c.ctor}\t{nm m}\t{file}"
+    fs.flush
   IO.println s!"dead_fields\t{deadFields}\ndead_structs\t{deadStructs}\ndropped_constants\t{dropped}"
   return 0
 
