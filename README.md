@@ -25,7 +25,7 @@ The analyzer has to be built with the same Lean version as the project it analys
 `lean/lean-toolchain` to the project's toolchain, then
 
 ```bash
-cd lean && lake build          # builds lean/.lake/build/bin/fieldlive
+cd lean && lake build          # builds lean/.lake/build/bin/fieldlive and fieldedit
 ```
 
 ## Run
@@ -103,31 +103,63 @@ deleted declaration, and skips (and reports) any range that shares a line with o
 ### In rounds, checked: `clean.py`
 
 ```bash
-python3 clean.py --fieldlive …/fieldlive [--build CMD] [--wrap CMD] [--commit] -- --import Main --protect Statements
+python3 clean.py --fieldlive …/fieldlive [--fields] [--build CMD] [--wrap CMD] [--commit] -- --import Main --protect Statements
 ```
 
-builds the project, then repeats: analyse, check the root theorems, delete the plan, build. It
-stops when a round deletes nothing. Before each deletion it compares the roots (`--roots-out`)
+builds the project, then repeats: analyse, check the root theorems, delete the plan, build, until
+a round deletes nothing. With `--fields` it then removes the dead fields (below), and starts over
+while that removes any. Before each deletion it compares the roots (`--roots-out`)
 with round 0: same statements, same axioms. If a build fails or a root changed, it undoes that
 round's edits, says why, and stops with status 1. `--commit` commits each round that builds, and
 `--wrap` prefixes the analysis and the build (to cap their memory, for example). Options after
 `--` go to fieldlive.
 
-## Removing dead fields and unused arguments
+## Removing dead fields
 
 A dead field's value is still written at every place the structure is built, so the code it
-frees cannot be deleted until the field itself is gone. The flow is:
+frees cannot be deleted until the field itself is gone. `clean.py --fields` does it all; by hand:
 
-1. Find them: `lake env …/fieldlive --live-out before.txt OUT` writes `dead-fields.tsv` and
-   `field-reach.tsv` (what each field frees). Use `--only` to look at a chosen few.
-2. Remove the fields by hand: the field, its value at every construction site, and anything that
-   only passed it on. Build.
-3. `lake env …/fieldlive --before before.txt OUT2`: now `OUT2/prune-plan.tsv` lists what the edit
-   freed, checked against the edited tree. Apply it with `apply-plan.py` and build.
+```bash
+cd lean && lake build && cd -
+lake env …/fieldlive OUT                                  # dead-fields.tsv, field-sites.tsv, field-plan.tsv
+lake env …/fieldedit OUT/field-sites.tsv OUT/field-edits.tsv
+python3 remove-fields.py OUT --apply                       # removes the fields and what they freed
+lake build
+```
+
+`fieldedit` elaborates each file that builds or reads a dead field again and reads the info trees
+for the exact syntax of each place the field is written:
+
+- the field in the `structure` declaration, with its doc comment;
+- `field := v` in `{ … }` and in `where` structure instances;
+- its argument of `⟨…⟩` and of `S.mk a b c`.
+
+The edits never cut through code that stays: a removed entry takes the separator up to the next
+one. `remove-fields.py` applies them and `field-plan.tsv` (the declarations only the dead fields
+keep alive) in one pass. It leaves everything as it is if a field is read outside the code the
+plan deletes, or is built in a way `fieldedit` does not edit (`@S.mk`, a partial application, a
+binder `(a b : T)` that declares two fields). It then lists the blocked fields in
+`blocked-fields.tsv` and the others in `removable-fields.tsv`: run `fieldlive --only
+removable-fields.tsv` again (the plan depends on which fields go), then `fieldedit` and
+`remove-fields.py`. `clean.py --fields` does that itself, and when a removal does not build
+(`refine ⟨?_, ?_⟩` with one tactic block per field, or the `constructor` tactic, leave nothing to
+edit), it undoes it and tries the fields again in halves.
 
 Removing a field or an argument only weakens what is assumed, so the worst outcome is a build
-error, never an unsound proof. Unused arguments (`--mode args`, output `unused-args.tsv`) go the
-same way.
+error, never an unsound proof.
+
+### By hand, with a snapshot
+
+For edits the tools do not make (unused theorem arguments, `--mode args`, output
+`unused-args.tsv`; or fields that are blocked):
+
+1. `lake env …/fieldlive --live-out before.txt OUT` writes the live set before the edit (and
+   `field-reach.tsv`, what each field frees). Use `--only` to look at a chosen few.
+2. Edit by hand: the field or argument, its value at every use, and anything that only passed it
+   on. Build.
+3. `lake env …/fieldlive --before before.txt OUT2`: now `OUT2/prune-plan.tsv` lists what the edit
+   freed, checked against the edited tree. Apply it with `apply-plan.py` and build. Pass the same
+   `--only` as in step 1: other dead fields' freed code is still written at their sites.
 
 ## Outputs
 
@@ -137,6 +169,9 @@ same way.
 | `unused-modules.txt` | (unreachable mode) project modules that declare something but nothing live: candidates for deleting the whole file |
 | `plan-kept.tsv` | declarations left out of the plan, and the declaration that stays and mentions them |
 | `dead-fields.tsv` | structure, field, is-Prop, field index, number of fields, construction sites held back |
+| `field-sites.tsv` | (fields mode) projection, structure, field, index, number of fields, constructor, module, file: every file that builds or reads a dead field |
+| `field-plan.tsv` | (fields mode) like `prune-plan.tsv`: what only the dead fields keep alive, to delete together with the fields |
+| `field-edits.tsv` | (`fieldedit`) file, range, kind (`decl`, `value`, `arg`, or the blocking `reader`, `unknown`), projection |
 | `field-reach.tsv` | structure, field, count, then the declarations only that field keeps alive |
 | `unused-args.tsv` | theorem, argument index and name, type, call sites held back, declarations freed |
 | `dropped-constants.txt`, `dead-edges.csv` | the dropped kernel constants and the references among them (input for the older, text-based `prune.py`) |

@@ -1,5 +1,5 @@
 name = "fieldlive"
-defaultTargets = ["fieldlive"]
+defaultTargets = ["fieldlive", "fieldedit"]
 
 [[lean_exe]]
 name = "fieldlive"

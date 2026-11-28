@@ -44,6 +44,9 @@ private theorem private_unused : True := trivial
 
 instance instUnused : Inhabited (Fin 3) := ⟨0⟩
 
+/-- A private instance: its name is internal (`_private…`), but it is no generated instance. -/
+private instance instPrivUnused : Inhabited (Fin 4) := ⟨0⟩
+
 /-- An unused local instance of a class written through a definition (`DecidableEq`): kept. -/
 local instance instDecEqUnit' : DecidableEq PUnit := fun _ _ => isTrue rfl
 
@@ -64,6 +67,13 @@ def onlyForSimp : Nat := 2
 
 /-- Proved by `rfl`; `Fix.Keep` writes its name, so it stays, and with it `onlyForSimp`. -/
 theorem onlyForSimp_def : onlyForSimp = 2 := rfl
+
+/-- Unreachable, and named by the `variable` line below, which no kernel term shows. -/
+def inVariable : Nat := 1
+
+section
+variable (h : inVariable = 1)
+end
 
 def twice (n : Nat) : Nat := n + n
 

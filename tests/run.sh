@@ -22,7 +22,7 @@ decls() { tail -n +2 "$1" | cut -f8 | tr ';' '\n' | grep -v "^$" | LC_ALL=C sort
 # 1. unreachable mode
 fl --mode unreachable "$TMP/u" >/dev/null
 expect "unreachable: plan" \
-  "$(printf "%s\n" Fix.onlyForSimp Fix.onlyForSimp_def Fix.twice_def Fix.unusedDef_spec Fix.unusedRec Fix.unusedRec.go Fix.unused_open Fix.uses_mentioned "private Fix.private_unused" lonely | LC_ALL=C sort | tr "\n" " ")" \
+  "$(printf "%s\n" Fix.inVariable Fix.onlyForSimp Fix.onlyForSimp_def Fix.twice_def Fix.unusedDef_spec Fix.unusedRec Fix.unusedRec.go Fix.unused_open Fix.uses_mentioned "private Fix.private_unused" lonely | LC_ALL=C sort | tr "\n" " ")" \
   "$(decls "$TMP/u/prune-plan.tsv")"
 expect "unreachable: unused modules" "Fix.Unused" "$(cat "$TMP/u/unused-modules.txt")"
 fl --mode unreachable --no-import-all "$TMP/un" >/dev/null
@@ -35,6 +35,8 @@ expect "unreachable: what a kept row needs is kept" "1" "$(grep -c '^def onlyFor
 expect "unreachable: rfl theorem used by simp only kept" "1" "$(grep -c '^theorem twice_def' Fix/Basic.lean)"
 expect "unreachable: open … in prefix removed" "0" "$(grep -c '^open Nat in' Fix/Basic.lean || true)"
 expect "unreachable: notation and its target kept" "1" "$(grep -c '^scoped notation' Fix/Basic.lean)"
+expect "unreachable: declaration named by a variable line kept" "1" "$(grep -c '^def inVariable' Fix/Basic.lean)"
+expect "unreachable: private instance kept" "1" "$(grep -c '^private instance instPrivUnused' Fix/Basic.lean)"
 expect "unreachable: rfl simp lemma, coercion and DecidableEq instance kept" "3" "$(grep -cE '^(@\[simp\] theorem unusedDef_zero|instance instCoeBoolNat|local instance instDecEqUnit)' Fix/Basic.lean)"
 expect "unreachable: pruned tree builds" "0" "$(lake build -q >/dev/null 2>&1; echo $?)"
 rm -rf Fix && cp -r "$TMP/Fix" Fix

@@ -691,6 +691,20 @@ def writePlan (env : Environment) (modNames : Array Name) (outdir : String) (isP
           if !live.contains k then work := work.push k
   kept.flush
   let sp ← getSrcSearchPath
+  -- every declaration's lines: text outside them (`variable`, `attribute`, …) is not in any kernel
+  -- term, so apply-plan.py checks it for the names of the declarations it deletes
+  let mut fileOf : Std.HashMap Name String := {}
+  let dr ← IO.FS.Handle.mk (outdir ++ "/decl-ranges.tsv") .write
+  dr.putStrLn "file\tstart_line\tend_line"
+  for r in us do
+    let f ← match fileOf[r.mod]? with
+      | some f => pure f
+      | none => do
+        let f := match ← sp.findModuleWithExt "lean" r.mod with | some f => f.toString | none => ""
+        fileOf := fileOf.insert r.mod f
+        pure f
+    if !f.isEmpty then dr.putStrLn s!"{f}\t{r.sl}\t{r.el}"
+  dr.flush
   -- row ids, and for each row the other rows it mentions: if a row stays, so must those
   let mut rowOf : Std.HashMap Nat Nat := {}
   for u in [0:us.size] do
@@ -788,8 +802,10 @@ unsafe def mainImpl (args : List String) : IO UInt32 := do
     if !isProject n then continue
     if isProtected n && !n.isInternalDetail then roots := roots.push n
     else if isMetaLike env n ci then roots := roots.push n; nMeta := nMeta + 1
-    -- not generated instances (`_sizeOf_inst` reads every field; it is made again from the structure)
-    else if !cfg.pruneInstances && !n.isInternal && isClassValued env ci then roots := roots.push n; nInst := nInst + 1
+    -- not generated instances (`_sizeOf_inst` reads every field; it is made again from the
+    -- structure). Private names are internal too, so look at the last component only.
+    else if !cfg.pruneInstances && !(match n with | .str _ s => s.startsWith "_" | _ => false) &&
+        isClassValued env ci then roots := roots.push n; nInst := nInst + 1
     if let some t := Compiler.getImplementedBy? env n then roots := roots.push t
     -- the entry point of an executable
     if n == `main then roots := roots.push n

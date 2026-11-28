@@ -41,16 +41,63 @@ def short(decl):
     return decl.removeprefix('private ').rsplit('.', 1)[-1]
 
 
-def text_check(rows, src):
-    """rows marked `text` whose name is written somewhere outside the rows being deleted:
-    {(path, start_line): 'file:line'}. Repeats until stable, since a kept row's text counts."""
-    names = {}
+def code_lines(text):
+    """the lines of a Lean source with comments (nested `/- -/`, `--`) and string literals blanked"""
+    out, i, n, depth = [], 0, len(text), 0
+    buf = []
+    while i < n:
+        c = text[i]
+        if depth:
+            if text.startswith('/-', i):
+                depth += 1; i += 2; buf.append('  '); continue
+            if text.startswith('-/', i):
+                depth -= 1; i += 2; buf.append('  '); continue
+            buf.append('\n' if c == '\n' else ' '); i += 1; continue
+        if text.startswith('/-', i):
+            depth = 1; i += 2; buf.append('  '); continue
+        if text.startswith('--', i):
+            j = text.find('\n', i)
+            j = n if j < 0 else j
+            buf.append(' ' * (j - i)); i = j; continue
+        if c == '"':
+            j = i + 1
+            while j < n and text[j] != '"' and text[j] != '\n':
+                j += 2 if text[j] == '\\' else 1
+            buf.append(' ' * (min(j + 1, n) - i)); i = j + 1; continue
+        buf.append(c); i += 1
+    return ''.join(buf).split('\n')
+
+
+def read_decl_ranges(path):
+    """{realpath: sorted [(start, end)]} from fieldlive's decl-ranges.tsv"""
+    out = collections.defaultdict(list)
+    with open(path, encoding='utf-8') as f:
+        for r in csv.DictReader(f, delimiter='\t'):
+            out[os.path.realpath(r['file'])].append((int(r['start_line']), int(r['end_line'])))
+    for v in out.values():
+        v.sort()
+    return out
+
+
+def inside(spans, ln):
+    """whether line `ln` is in one of the (start, end) spans"""
+    return any(s <= ln <= e for s, e in spans)
+
+
+def text_check(rows, src, decls=None):
+    """rows whose name is written somewhere it counts, outside the rows being deleted:
+    {(path, start_line): 'file:line'}. For a `text` row (a theorem proved by `rfl`, which
+    `simp only [h]` uses without a trace) that is anywhere. For an `exact` row it is only outside
+    every declaration (`decls`, from decl-ranges.tsv): uses inside declarations are in the kernel
+    terms, but `variable`, `attribute` and the like are not. Comments and strings do not count.
+    Repeats until stable, since a kept row's text counts."""
+    names = {}  # short name -> {(key, check)}
     for path, rs in rows.items():
         for r in rs:
-            if r[6] == 'text':
+            if r[6] == 'text' or decls is not None:
                 for d in r[5].split(';'):
                     if d:
-                        names.setdefault(short(d), set()).add((path, r[0]))
+                        names.setdefault(short(d), set()).add(((path, r[0]), r[6]))
     if not names:
         return {}
     hits = collections.defaultdict(list)  # name -> [(path, line)]
@@ -62,11 +109,12 @@ def text_check(rows, src):
                 continue
             path = os.path.join(root, fn)
             with open(path, encoding='utf-8') as f:
-                for i, line in enumerate(f, 1):
-                    for w in IDENT.findall(line):
-                        part = w.rsplit('.', 1)[-1]
-                        if part in names:
-                            hits[part].append((os.path.realpath(path), i))
+                text = f.read()
+            for i, line in enumerate(code_lines(text), 1):
+                for w in IDENT.findall(line):
+                    part = w.rsplit('.', 1)[-1]
+                    if part in names:
+                        hits[part].append((os.path.realpath(path), i))
     spans = {}  # realpath -> [(start, end, key)]
     for path, rs in rows.items():
         for r in rs:
@@ -75,15 +123,21 @@ def text_check(rows, src):
     while True:
         changed = False
         for name, keys in names.items():
-            for key in keys:
+            for key, check in keys:
                 if key in skip:
                     continue
                 for p, ln in hits.get(name, []):
-                    inside = [k for s, e, k in spans.get(p, []) if s <= ln <= e]
-                    if not inside or any(k in skip for k in inside):
-                        skip[key] = f'{p}:{ln}'
-                        changed = True
-                        break
+                    if check != 'text':
+                        # inside any declaration, kept or deleted, the kernel terms tell
+                        if inside(decls.get(p, []), ln):
+                            continue
+                    else:
+                        within = [k for s, e, k in spans.get(p, []) if s <= ln <= e]
+                        if within and not any(k in skip for k in within):
+                            continue
+                    skip[key] = f'{p}:{ln}'
+                    changed = True
+                    break
         if not changed:
             return skip
 
@@ -105,7 +159,8 @@ def plan_cuts(plan, src):
     """what to delete: (texts {path: lines}, cut {path: set of 0-based line indices},
     deleted [(path, line, module, names)], skipped [(path, line, why, names)])"""
     rows = read_plan(plan, src)
-    text_skip = text_check(rows, src)
+    dr = os.path.join(os.path.dirname(os.path.abspath(plan)), 'decl-ranges.tsv')
+    text_skip = text_check(rows, src, read_decl_ranges(dr) if os.path.exists(dr) else None)
 
     # first, which rows cannot be deleted, and why
     texts, why = {}, {}
